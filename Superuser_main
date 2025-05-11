@@ -32,6 +32,8 @@ do
     chmod 755 "$su_path"
 done
 
+
+
 # mkdir_path --su-path=<path>/system/bin/su /debug_ramdisk/su /system/xbin/su /sbin/su /sbin/bin/su /system/sbin/su /su/xbin/su /su/bin/su /magisk/.core/bin/su
 
 setup binary folder && execute_install
