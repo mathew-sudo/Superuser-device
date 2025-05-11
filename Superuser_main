@@ -13,7 +13,24 @@ armv7a-linux-androideabi30-clang su.c -o su
 # For x86
 i686-linux-android30-clang su.c -o su
 
+SU_BINARY_PATH="/path/to/your/compiled/su"
 
+for su_path in \
+    /system/bin/su \
+    /debug_ramdisk/su \
+    /system/xbin/su \
+    /sbin/su \
+    /sbin/bin/su \
+    /system/sbin/su \
+    /su/xbin/su \
+    /su/bin/su \
+    /magisk/.core/bin/su
+do
+    dir=$(dirname "$su_path")
+    mkdir -p "$dir"
+    cp "$SU_BINARY_PATH" "$su_path"
+    chmod 755 "$su_path"
+done
 
 # mkdir_path --su-path=<path>/system/bin/su /debug_ramdisk/su /system/xbin/su /sbin/su /sbin/bin/su /system/sbin/su /su/xbin/su /su/bin/su /magisk/.core/bin/su
 
