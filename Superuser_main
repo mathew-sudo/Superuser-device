@@ -1,3 +1,20 @@
+git clone https://github.com/phhusson/superuser.git
+cd superuser/su
+# Set up NDK environment variables, e.g.
+export NDK=/path/to/android-ndk
+export PATH=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
+
+# For arm64 (aarch64)
+aarch64-linux-android30-clang su.c -o su
+
+# For arm (armeabi-v7a)
+armv7a-linux-androideabi30-clang su.c -o su
+
+# For x86
+i686-linux-android30-clang su.c -o su
+
+
+
 # mkdir_path --su-path=<path>/system/bin/su /debug_ramdisk/su /system/xbin/su /sbin/su /sbin/bin/su /system/sbin/su /su/xbin/su /su/bin/su /magisk/.core/bin/su
 
 setup binary folder && execute_install
