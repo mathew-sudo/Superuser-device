@@ -1,3 +1,31 @@
 # mkdir_path --su-path=<path>/system/bin/su /debug_ramdisk/su /system/xbin/su /sbin/su /sbin/bin/su /system/sbin/su /su/xbin/su /su/bin/su /magisk/.core/bin/su
 
 setup binary folder && execute_install
+
+for su_path in /system/bin/su /debug_ramdisk/su /system/xbin/su /sbin/su /sbin/bin/su /system/sbin/su /su/xbin/su /su/bin/su /magisk/.core/bin/su; do
+    dir=$(dirname "$su_path")
+    mkdir -p "$dir"
+    # Optionally, place your su binary at $su_path, e.g.:
+    # cp /path/to/your/su "$su_path"
+    # chmod 755 "$su_path"
+done
+
+# List of typical su binary locations on Android
+for su_path in \
+    /system/bin/su \
+    /debug_ramdisk/su \
+    /system/xbin/su \
+    /sbin/su \
+    /sbin/bin/su \
+    /system/sbin/su \
+    /su/xbin/su \
+    /su/bin/su \
+    /magisk/.core/bin/su
+do
+    dir=$(dirname "$su_path")
+    mkdir -p "$dir"         # Create the directory if it doesn't already exist
+
+    # Optional: Copy your su binary into place and set permissions
+    # cp /path/to/your/su "$su_path"
+    # chmod 755 "$su_path"
+done
