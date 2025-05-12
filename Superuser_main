@@ -1,66 +1,99 @@
-git clone https://github.com/phhusson/superuser.git
+#!/bin/bash
+set -e
+
+# Android Superuser Setup Script (for ARMv7 devices/tablets)
+# This script clones, compiles, and installs the su binary,
+# and places it in all standard Android superuser locations, from / to /0.
+
+# Ensure running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "Script requires root. Re-running with su..."
+    exec su -c "$0 $*"
+fi
+
+# Set NDK Version and download location
+NDK_VERSION="r25c"
+NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+NDK_DIR="/data/local/tmp/android-ndk-${NDK_VERSION}"
+
+if [ ! -d "$NDK_DIR" ]; then
+    echo "Downloading Android NDK $NDK_VERSION..."
+    wget "$NDK_URL" -O /data/local/tmp/android-ndk.zip || { echo "Failed to download NDK."; exit 1; }
+    echo "Extracting NDK..."
+    unzip /data/local/tmp/android-ndk.zip -d /data/local/tmp/ || { echo "Failed to extract NDK."; exit 1; }
+fi
+
+export NDK="$NDK_DIR"
+export PATH="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+
+# Clone phhusson/superuser if not present
+cd /data/local/tmp
+if [ ! -d "superuser" ]; then
+    git clone https://github.com/phhusson/superuser.git || { echo "Git clone failed."; exit 1; }
+fi
+
 cd superuser/su
-# Set up NDK environment variables, e.g.
-export NDK=/path/to/android-ndk
-export PATH=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH
 
-# For arm64 (aarch64)
-aarch64-linux-android30-clang su.c -o su
+# Compile su for armv7 (API 21+)
+if ! armv7a-linux-androideabi21-clang su.c -o su-armv7; then
+    echo "Compilation failed."
+    exit 1
+fi
 
-# For arm (armeabi-v7a)
-armv7a-linux-androideabi30-clang su.c -o su
+echo "su binary built at $(pwd)/su-armv7"
 
-# For x86
-i686-linux-android30-clang su.c -o su
-
-SU_BINARY_PATH="/path/to/your/compiled/su"
-
-for su_path in \
-    /system/bin/su \
-    /debug_ramdisk/su \
-    /system/xbin/su \
-    /sbin/su \
-    /sbin/bin/su \
-    /system/sbin/su \
-    /su/xbin/su \
-    /su/bin/su \
+# Define all standard Android su locations (including / to /0)
+su_paths=(
+    /system/bin/su
+    /system/xbin/su
+    /sbin/su
+    /su/bin/su
+    /su/xbin/su
+    /system/sbin/su
     /magisk/.core/bin/su
-do
+    /debug_ramdisk/su
+    /sbin/bin/su
+    /system/su
+    /system/xbin/daemonsu
+    /system/xbin/busybox
+    /su
+    /xbin/su
+    /bin/su
+    /0/su
+)
+
+# Remount /system as rw if possible (may fail on modern devices)
+mount | grep ' /system ' && mount -o remount,rw /system || echo "Warning: Could not remount /system as rw. Skipping."
+
+# Copy and set permissions for all su locations
+for su_path in "${su_paths[@]}"; do
     dir=$(dirname "$su_path")
-    mkdir -p "$dir"
-    cp "$SU_BINARY_PATH" "$su_path"
-    chmod 755 "$su_path"
+    # Create directory if it doesn't exist
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir" || { echo "Failed to create $dir"; continue; }
+        chmod 755 "$dir"
+    fi
+    # Copy su binary
+    cp su-armv7 "$su_path" && echo "Copied su to $su_path" || { echo "Failed to copy su to $su_path"; continue; }
+    chmod 6755 "$su_path" || echo "Failed to set permissions for $su_path"
+    chown root:root "$su_path" || echo "Failed to set ownership for $su_path"
 done
 
+# Remount /system as ro for safety
+mount | grep ' /system ' && mount -o remount,ro /system || true
 
-# mkdir_path --su-path=<path>/system/bin/su /debug_ramdisk/su /system/xbin/su /sbin/su /sbin/bin/su /system/sbin/su /su/xbin/su /su/bin/su /magisk/.core/bin/su
+echo "Superuser binary installed to all standard locations."
 
-setup binary folder && execute_install
+# Backup recommendation
+echo "It is strongly recommended that you backup your system partition before running this script."
+echo "For example: adb pull /system /path/to/backup/location"
 
-for su_path in /system/bin/su /debug_ramdisk/su /system/xbin/su /sbin/su /sbin/bin/su /system/sbin/su /su/xbin/su /su/bin/su /magisk/.core/bin/su; do
-    dir=$(dirname "$su_path")
-    mkdir -p "$dir"
-    # Optionally, place your su binary at $su_path, e.g.:
-    # cp /path/to/your/su "$su_path"
-    # chmod 755 "$su_path"
+# Test su binary
+echo "Testing su binary:"
+for su_path in "${su_paths[@]}"; do
+    if [ -f "$su_path" ]; then
+        "$su_path" -v || echo "Could not execute $su_path"
+    fi
 done
 
-# List of typical su binary locations on Android
-for su_path in \
-    /system/bin/su \
-    /debug_ramdisk/su \
-    /system/xbin/su \
-    /sbin/su \
-    /sbin/bin/su \
-    /system/sbin/su \
-    /su/xbin/su \
-    /su/bin/su \
-    /magisk/.core/bin/su
-do
-    dir=$(dirname "$su_path")
-    mkdir -p "$dir"         # Create the directory if it doesn't already exist
-
-    # Optional: Copy your su binary into place and set permissions
-    # cp /path/to/your/su "$su_path"
-    # chmod 755 "$su_path"
-done
+echo "Script completed."
