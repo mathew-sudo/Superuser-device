@@ -1,288 +1,255 @@
-# Add at the beginning of your script
-LOG_FILE="/data/local/tmp/superuser_install.log"
-exec 1> >(tee -a "$LOG_FILE")
-exec 2>&1
-
-# Error handling function
-handle_error() {
-    local last_cmd=$1
-    local last_line=$2
-    
-    echo "Error occurred in command '$last_cmd' on line $last_line"
-    echo "Attempting recovery..."
-    
-    case "$last_cmd" in
-        *"mount"*)
-            echo "Mount operation failed, trying alternative mount points..."
-            # Try alternative mount points
-            ;;
-        *"cp"*)
-            echo "Copy operation failed, trying alternative copy method..."
-            # Try alternative copy method
-            ;;
-        *)
-            echo "Unknown error occurred"
-            ;;
-    esac
-}
-
-trap 'handle_error "${BASH_COMMAND}" "${LINENO}"' ERR
-
-name: Superuser CI Tests
-
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Android NDK
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: r25c
-    
-    - name: Run Tests
-      run: |
-        # Compile test
-        cd ${{ github.workspace }}/Superuser_main
-        ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang su.c -o su-armv7
-        
-        # Basic compilation checks
-        if [ ! -f "su-armv7" ]; then
-          echo "Compilation failed"
-          exit 1
-        fi
-        
-        # File permission checks
-        if [ "$(stat -c %a su-armv7)" != "755" ]; then
-          echo "Incorrect file permissions"
-          exit 1
-        fi
-
-2. Create a test script (`test_su.sh`) to verify functionality:
-
-```bash
 #!/bin/bash
 set -e
 
-# Test Functions
-test_compilation() {
-    echo "Testing compilation..."
-    armv7a-linux-androideabi21-clang su.c -o su-armv7
-    if [ ! -f "su-armv7" ]; then
-        return 1
-    fi
-    return 0
-}
+# Version and branding
+VERSION="1.0-prototype"
+BRAND_NAME="Enhanced Superuser Terminal"
+ROOT_USER="root@superuser"
 
-test_permissions() {
-    echo "Testing file permissions..."
-    local required_perms="6755"
-    local actual_perms=$(stat -c %a su-armv7)
-    if [ "$actual_perms" != "$required_perms" ]; then
+# Safe removal function
+safe_remove() {
+    local target="$1"
+    local is_force="${2:-false}"
+    
+    # Security checks
+    if [[ "$target" =~ ^(/system|/vendor|/data/data|/data/app|/data/local/tmp)$ ]]; then
+        echo -e "${COLORS[RED]}Error: Cannot remove protected system directory${COLORS[NC]}"
         return 1
-    fi
-    return 0
-}
-
-test_paths() {
-    echo "Testing installation paths..."
-    for path in "${su_paths[@]}"; do
-        if [ ! -d "$(dirname "$path")" ]; then
-            echo "Directory $path does not exist"
+    }
+    
+    # Verification prompt unless force flag is set
+    if [ "$is_force" != "true" ]; then
+        read -p "Are you sure you want to remove $target? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             return 1
         fi
+    fi
+    
+    # Backup before removal
+    if [ -e "$target" ]; then
+        local backup_path="$BACKUP_DIR/$(basename "$target")_$(date +%Y%m%d_%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        cp -r "$target" "$backup_path"
+        rm -rf "$target"
+        echo "Removed $target (Backup at $backup_path)"
+    else
+        echo "Target $target does not exist"
+    fi
+}
+
+# Root@Superuser directory setup
+setup_root_superuser() {
+    local root_dirs=(
+        "/data/superuser"
+        "/data/superuser/bin"
+        "/data/superuser/etc"
+        "/data/superuser/lib"
+        "/data/superuser/tmp"
+    )
+    
+    # Create directories with proper permissions
+    for dir in "${root_dirs[@]}"; do
+        mkdir -p "$dir"
+        chmod 700 "$dir"
+        chown root:root "$dir"
     done
-    return 0
+    
+    # Setup root@superuser environment
+    cat > /data/superuser/etc/profile << EOF
+export PATH="/data/superuser/bin:$PATH"
+export SUPERUSER_HOME="/data/superuser"
+PS1='root@superuser:\w# '
+EOF
+    
+    # Create symbolic links
+    ln -sf /data/superuser/bin/su /system/xbin/su
+    ln -sf /data/superuser/etc/profile /system/etc/profile.d/superuser.sh
 }
 
-3. Enhance the main script with AI-driven compatibility checking:
-
-```bash
-#!/bin/bash
-set -e
-
-# AI-driven compatibility check function
-check_device_compatibility() {
-    local device_arch=$(getprop ro.product.cpu.abi)
-    local android_ver=$(getprop ro.build.version.release)
-    local sdk_ver=$(getprop ro.build.version.sdk)
+# Trusted Installer configuration
+setup_trusted_installer() {
+    # Create trusted installer directory
+    mkdir -p /data/trusted_installer
+    chmod 700 /data/trusted_installer
     
-    # Log device information for analysis
-    echo "Device Architecture: $device_arch"
-    echo "Android Version: $android_ver"
-    echo "SDK Version: $sdk_ver"
+    # Generate trusted installer key
+    openssl genrsa -out /data/trusted_installer/private.key 4096
+    chmod 600 /data/trusted_installer/private.key
     
-    # Compatibility checks
-    if [[ "$device_arch" != "armeabi-v7a" && "$device_arch" != "arm64-v8a" ]]; then
-        echo "Warning: Unsupported architecture $device_arch"
-        return 1
-    fi
+    # Create trusted installer configuration
+    cat > /data/trusted_installer/config.json << EOF
+{
+    "name": "Superuser Trusted Installer",
+    "version": "$VERSION",
+    "permissions": ["SYSTEM_MODIFY", "GODMODE"],
+    "allowed_paths": ["/system", "/vendor", "/data"],
+    "activation_key": "$(openssl rand -hex 32)"
+}
+EOF
     
-    if [ "$sdk_ver" -lt 21 ]; then
-        echo "Warning: Android SDK version too low (minimum: 21, found: $sdk_ver)"
-        return 1
-    fi
-    
-    return 0
+    chmod 600 /data/trusted_installer/config.json
 }
 
-# Enhanced error handling
-handle_installation_error() {
-    local error_code=$1
-    local error_msg=$2
+# Enhanced Termux properties configuration
+configure_termux_properties() {
+    local TERMUX_PROPERTIES="$HOME/.termux/termux.properties"
     
-    case $error_code in
-        1)
-            echo "Installation failed: $error_msg"
-            echo "Attempting alternative installation method..."
-            # Try alternative installation method
-            ;;
-        2)
-            echo "Permission error: $error_msg"
-            echo "Checking SELinux context..."
-            # Check and fix SELinux context
-            ;;
-        *)
-            echo "Unknown error: $error_msg"
-            ;;
-    esac
+    # Backup existing configuration
+    if [ -f "$TERMUX_PROPERTIES" ]; then
+        cp "$TERMUX_PROPERTIES" "${TERMUX_PROPERTIES}.backup"
+    fi
+    
+    # Create new configuration
+    cat > "$TERMUX_PROPERTIES" << EOF
+# Enhanced Superuser Terminal Configuration
+allow_external_apps=true
+allow_external_scripts=true
+allow_termux_float=true
+allow_termux_display_over_other_apps=true
+terminal_margin=0
+terminal_transcript_rows=8000
+bell-character=vibrate
+use-black-ui=true
+extra-keys-style=arrows-all
+bootstrap_secondary_package_repair=true
+EOF
+    
+    # Set proper permissions
+    chmod 600 "$TERMUX_PROPERTIES"
 }
 
-# Add to your existing script
-if ! check_device_compatibility; then
-    echo "Device compatibility check failed. Proceeding with caution..."
-fi
+# Security protocols and filters
+setup_security() {
+    # Install security packages
+    pkg install -y \
+        clamav \
+        apparmor \
+        selinux-python \
+        audit
+    
+    # Configure ClamAV
+    freshclam
+    
+    # Setup AppArmor profiles
+    cat > /etc/apparmor.d/superuser << EOF
+#include <tunables/global>
+profile superuser {
+    #include <abstractions/base>
+    #include <abstractions/nameservice>
+    
+    /data/superuser/** rwx,
+    /system/xbin/su mr,
+    /system/bin/* ix,
+    deny /data/data/** w,
+}
+EOF
+    
+    # Configure audit rules
+    cat > /etc/audit/rules.d/superuser.rules << EOF
+-w /data/superuser -p wa -k superuser_access
+-w /system/xbin/su -p x -k su_execution
+EOF
+    
+    # Reload security policies
+    apparmor_parser -r /etc/apparmor.d/superuser
+    auditctl -R /etc/audit/rules.d/superuser.rules
+}
 
-# Add before the main installation logic
-if ! check_device_compatibility; then
-    read -p "Device compatibility check failed. Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-fi
-
-# Modify the installation loop to include error handling
-for su_path in "${su_paths[@]}"; do
-    dir=$(dirname "$su_path")
-    if ! mkdir -p "$dir" 2>/dev/null; then
-        handle_installation_error 1 "Failed to create directory $dir"
-        continue
+# Bootstrap repair function
+repair_bootstrap() {
+    echo "Attempting to repair bootstrap..."
+    
+    # Backup current bootstrap
+    if [ -d "$PREFIX" ]; then
+        tar czf "$BACKUP_DIR/bootstrap_$(date +%Y%m%d_%H%M%S).tar.gz" "$PREFIX"
     fi
     
-    if ! cp su-armv7 "$su_path" 2>/dev/null; then
-        handle_installation_error 2 "Failed to copy su to $su_path"
-        continue
+    # Reinstall base packages
+    pkg install -y \
+        termux-tools \
+        termux-exec \
+        termux-keyring \
+        termux-am
+        
+    # Repair package manager
+    pkg clean
+    rm -f $PREFIX/var/lib/dpkg/lock*
+    dpkg --configure -a
+    
+    # Update sources
+    pkg update -y
+}
+
+# Command prompt enhancement
+setup_custom_prompt() {
+    cat >> $HOME/.bashrc << EOF
+# Custom prompt for Superuser
+PS1='\[\e[0;32m\][\[\e[0m\]\[\e[0;31m\]root@superuser\[\e[0m\]\[\e[0;32m\]]\[\e[0m\] \[\e[0;32m\]\w\[\e[0m\] # '
+alias cd#='cd /'
+EOF
+    
+    source $HOME/.bashrc
+}
+
+# Main enhancement function
+enhance_superuser() {
+    echo -e "${COLORS[CYAN]}Enhancing Superuser Terminal...${COLORS[NC]}"
+    
+    # Setup directories and permissions
+    setup_root_superuser
+    setup_trusted_installer
+    
+    # Configure Termux
+    configure_termux_properties
+    setup_custom_prompt
+    
+    # Setup security
+    setup_security
+    
+    # Repair bootstrap if needed
+    repair_bootstrap
+    
+    echo -e "${COLORS[GREEN]}Enhancements completed!${COLORS[NC]}"
+}
+
+# Add these to your existing main() function
+main() {
+    # ... (existing main function code) ...
+    
+    # Add new enhancements
+    enhance_superuser
+    
+    # ... (rest of existing main function code) ...
+}
+
+# Error handling with specific error types
+trap 'handle_error "${BASH_COMMAND}" "${LINENO}" "${ERROR_TYPE:-UNKNOWN}"' ERR
+
+# Run the enhanced installation
+main "$@"
+
+- name: Test Enhanced Features
+  run: |
+    # Test safe removal
+    mkdir -p test_dir
+    ./safe_remove.sh test_dir
+    if [ -d "test_dir" ]; then
+      echo "Safe removal failed"
+      exit 1
     fi
     
-    chmod 6755 "$su_path" || handle_installation_error 2 "Failed to set permissions for $su_path"
-    chown root:root "$su_path" || handle_installation_error 2 "Failed to set ownership for $su_path"
-done
-
-#!/bin/bash
-set -e
-
-# Android Superuser Setup Script (for ARMv7 devices/tablets)
-# This script clones, compiles, and installs the su binary,
-# and places it in all standard Android superuser locations, from / to /0.
-
-# Ensure running as root
-if [ "$EUID" -ne 0 ]; then
-    echo "Script requires root. Re-running with su..."
-    exec su -c "$0 $*"
-fi
-
-# Set NDK Version and download location
-NDK_VERSION="r25c"
-NDK_URL="https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
-NDK_DIR="/data/local/tmp/android-ndk-${NDK_VERSION}"
-
-if [ ! -d "$NDK_DIR" ]; then
-    echo "Downloading Android NDK $NDK_VERSION..."
-    wget "$NDK_URL" -O /data/local/tmp/android-ndk.zip || { echo "Failed to download NDK."; exit 1; }
-    echo "Extracting NDK..."
-    unzip /data/local/tmp/android-ndk.zip -d /data/local/tmp/ || { echo "Failed to extract NDK."; exit 1; }
-fi
-
-export NDK="$NDK_DIR"
-export PATH="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-
-# Clone phhusson/superuser if not present
-cd /data/local/tmp
-if [ ! -d "superuser" ]; then
-    git clone https://github.com/phhusson/superuser.git || { echo "Git clone failed."; exit 1; }
-fi
-
-cd superuser/su
-
-# Compile su for armv7 (API 21+)
-if ! armv7a-linux-androideabi21-clang su.c -o su-armv7; then
-    echo "Compilation failed."
-    exit 1
-fi
-
-echo "su binary built at $(pwd)/su-armv7"
-
-# Define all standard Android su locations (including / to /0)
-su_paths=(
-    /system/bin/su
-    /system/xbin/su
-    /sbin/su
-    /su/bin/su
-    /su/xbin/su
-    /system/sbin/su
-    /magisk/.core/bin/su
-    /debug_ramdisk/su
-    /sbin/bin/su
-    /system/su
-    /system/xbin/daemonsu
-    /system/xbin/busybox
-    /su
-    /xbin/su
-    /bin/su
-    /0/su
-)
-
-# Remount /system as rw if possible (may fail on modern devices)
-mount | grep ' /system ' && mount -o remount,rw /system || echo "Warning: Could not remount /system as rw. Skipping."
-
-# Copy and set permissions for all su locations
-for su_path in "${su_paths[@]}"; do
-    dir=$(dirname "$su_path")
-    # Create directory if it doesn't exist
-    if [ ! -d "$dir" ]; then
-        mkdir -p "$dir" || { echo "Failed to create $dir"; continue; }
-        chmod 755 "$dir"
+    # Test trusted installer
+    if [ ! -f "/data/trusted_installer/config.json" ]; then
+      echo "Trusted installer setup failed"
+      exit 1
     fi
-    # Copy su binary
-    cp su-armv7 "$su_path" && echo "Copied su to $su_path" || { echo "Failed to copy su to $su_path"; continue; }
-    chmod 6755 "$su_path" || echo "Failed to set permissions for $su_path"
-    chown root:root "$su_path" || echo "Failed to set ownership for $su_path"
-done
-
-# Remount /system as ro for safety
-mount | grep ' /system ' && mount -o remount,ro /system || true
-
-echo "Superuser binary installed to all standard locations."
-
-# Backup recommendation
-echo "It is strongly recommended that you backup your system partition before running this script."
-echo "For example: adb pull /system /path/to/backup/location"
-
-# Test su binary
-echo "Testing su binary:"
-for su_path in "${su_paths[@]}"; do
-    if [ -f "$su_path" ]; then
-        "$su_path" -v || echo "Could not execute $su_path"
+    
+    # Test Termux properties
+    if [ ! -f "$HOME/.termux/termux.properties" ]; then
+      echo "Termux properties configuration failed"
+      exit 1
     fi
-done
 
-echo "Script completed."
+chmod +x script.sh
+sudo ./script.sh
