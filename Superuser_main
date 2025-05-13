@@ -1,3 +1,31 @@
+
+
+# Add before the main installation logic
+if ! check_device_compatibility; then
+    read -p "Device compatibility check failed. Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# Modify the installation loop to include error handling
+for su_path in "${su_paths[@]}"; do
+    dir=$(dirname "$su_path")
+    if ! mkdir -p "$dir" 2>/dev/null; then
+        handle_installation_error 1 "Failed to create directory $dir"
+        continue
+    fi
+    
+    if ! cp su-armv7 "$su_path" 2>/dev/null; then
+        handle_installation_error 2 "Failed to copy su to $su_path"
+        continue
+    fi
+    
+    chmod 6755 "$su_path" || handle_installation_error 2 "Failed to set permissions for $su_path"
+    chown root:root "$su_path" || handle_installation_error 2 "Failed to set ownership for $su_path"
+done
+
 #!/bin/bash
 set -e
 
