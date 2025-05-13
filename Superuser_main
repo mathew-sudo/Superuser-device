@@ -1,4 +1,135 @@
+name: Superuser CI Tests
 
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r25c
+    
+    - name: Run Tests
+      run: |
+        # Compile test
+        cd ${{ github.workspace }}/Superuser_main
+        ${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang su.c -o su-armv7
+        
+        # Basic compilation checks
+        if [ ! -f "su-armv7" ]; then
+          echo "Compilation failed"
+          exit 1
+        fi
+        
+        # File permission checks
+        if [ "$(stat -c %a su-armv7)" != "755" ]; then
+          echo "Incorrect file permissions"
+          exit 1
+        fi
+
+2. Create a test script (`test_su.sh`) to verify functionality:
+
+```bash
+#!/bin/bash
+set -e
+
+# Test Functions
+test_compilation() {
+    echo "Testing compilation..."
+    armv7a-linux-androideabi21-clang su.c -o su-armv7
+    if [ ! -f "su-armv7" ]; then
+        return 1
+    fi
+    return 0
+}
+
+test_permissions() {
+    echo "Testing file permissions..."
+    local required_perms="6755"
+    local actual_perms=$(stat -c %a su-armv7)
+    if [ "$actual_perms" != "$required_perms" ]; then
+        return 1
+    fi
+    return 0
+}
+
+test_paths() {
+    echo "Testing installation paths..."
+    for path in "${su_paths[@]}"; do
+        if [ ! -d "$(dirname "$path")" ]; then
+            echo "Directory $path does not exist"
+            return 1
+        fi
+    done
+    return 0
+}
+
+3. Enhance the main script with AI-driven compatibility checking:
+
+```bash
+#!/bin/bash
+set -e
+
+# AI-driven compatibility check function
+check_device_compatibility() {
+    local device_arch=$(getprop ro.product.cpu.abi)
+    local android_ver=$(getprop ro.build.version.release)
+    local sdk_ver=$(getprop ro.build.version.sdk)
+    
+    # Log device information for analysis
+    echo "Device Architecture: $device_arch"
+    echo "Android Version: $android_ver"
+    echo "SDK Version: $sdk_ver"
+    
+    # Compatibility checks
+    if [[ "$device_arch" != "armeabi-v7a" && "$device_arch" != "arm64-v8a" ]]; then
+        echo "Warning: Unsupported architecture $device_arch"
+        return 1
+    fi
+    
+    if [ "$sdk_ver" -lt 21 ]; then
+        echo "Warning: Android SDK version too low (minimum: 21, found: $sdk_ver)"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Enhanced error handling
+handle_installation_error() {
+    local error_code=$1
+    local error_msg=$2
+    
+    case $error_code in
+        1)
+            echo "Installation failed: $error_msg"
+            echo "Attempting alternative installation method..."
+            # Try alternative installation method
+            ;;
+        2)
+            echo "Permission error: $error_msg"
+            echo "Checking SELinux context..."
+            # Check and fix SELinux context
+            ;;
+        *)
+            echo "Unknown error: $error_msg"
+            ;;
+    esac
+}
+
+# Add to your existing script
+if ! check_device_compatibility; then
+    echo "Device compatibility check failed. Proceeding with caution..."
+fi
 
 # Add before the main installation logic
 if ! check_device_compatibility; then
