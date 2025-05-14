@@ -251,5 +251,241 @@ main "$@"
       exit 1
     fi
 
+#!/bin/bash
+set -e
+
+# System Detection Functions
+detect_system() {
+    echo "Detecting system configuration..."
+    
+    # OS Detection
+    OS_NAME=$(getprop ro.product.system.name)
+    OS_VERSION=$(getprop ro.build.version.release)
+    SDK_VERSION=$(getprop ro.build.version.sdk)
+    
+    # CPU Detection
+    CPU_INFO=$(cat /proc/cpuinfo)
+    CPU_ARCH=$(uname -m)
+    CPU_CORES=$(nproc)
+    CPU_FREQ=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo "N/A")
+    
+    # Kernel Detection
+    KERNEL_VERSION=$(uname -r)
+    KERNEL_BUILD=$(cat /proc/version)
+    
+    # GPU Detection
+    GPU_INFO=$(dumpsys SurfaceFlinger | grep GLES)
+    GPU_VENDOR=$(getprop ro.board.platform)
+    
+    # Save system info
+    cat > "$SUPERUSER_HOME/system_info.json" << EOF
+{
+    "os": {
+        "name": "$OS_NAME",
+        "version": "$OS_VERSION",
+        "sdk": "$SDK_VERSION"
+    },
+    "cpu": {
+        "architecture": "$CPU_ARCH",
+        "cores": "$CPU_CORES",
+        "frequency": "$CPU_FREQ"
+    },
+    "gpu": {
+        "info": "$GPU_INFO",
+        "vendor": "$GPU_VENDOR"
+    },
+    "kernel": {
+        "version": "$KERNEL_VERSION",
+        "build": "$KERNEL_BUILD"
+    }
+}
+EOF
+}
+
+# Network Management
+setup_network() {
+    # Install network tools
+    pkg install -y \
+        iproute2 \
+        net-tools \
+        wireguard-tools \
+        openvpn \
+        macchanger
+        
+    # IP address management
+    change_ip() {
+        local interface="${1:-wlan0}"
+        # Backup current MAC
+        local original_mac=$(macchanger -s "$interface" | grep "Current" | awk '{print $3}')
+        
+        # Change MAC address
+        macchanger -r "$interface"
+        # Restart interface
+        ip link set "$interface" down
+        ip link set "$interface" up
+        
+        # Setup VPN tunnel
+        wg-quick up wg0 || echo "WireGuard setup failed"
+    }
+    
+    # Create network configuration
+    mkdir -p "$SUPERUSER_HOME/network"
+    cat > "$SUPERUSER_HOME/network/config.json" << EOF
+{
+    "vpn_enabled": true,
+    "mac_spoof": true,
+    "dns_servers": [
+        "1.1.1.1",
+        "8.8.8.8"
+    ]
+}
+EOF
+}
+
+# Registry and Authentication Management
+setup_registry() {
+    # Google Play Store Registry
+    PLAY_STORE_DIR="$SUPERUSER_HOME/playstore"
+    mkdir -p "$PLAY_STORE_DIR"
+    
+    # Generate device ID
+    ANDROID_ID=$(settings get secure android_id)
+    DEVICE_ID=$(echo -n "$ANDROID_ID" | md5sum | cut -d' ' -f1)
+    
+    # Create Play Store registry
+    cat > "$PLAY_STORE_DIR/registry.properties" << EOF
+PlayStore.deviceId=$DEVICE_ID
+PlayStore.account.type=hosted_or_google
+PlayStore.client.id=android-google
+PlayStore.device.country=$(getprop gsm.sim.operator.iso-country)
+EOF
+    
+    # Generate authentication key
+    AUTH_KEY=$(openssl rand -base64 32)
+    echo "auth.key=$AUTH_KEY" >> "$PLAY_STORE_DIR/registry.properties"
+    
+    # Update build.prop
+    BUILD_PROP="/system/build.prop"
+    mount -o rw,remount /system
+    
+    # Backup build.prop
+    cp "$BUILD_PROP" "$BUILD_PROP.backup"
+    
+    # Add custom properties
+    cat >> "$BUILD_PROP" << EOF
+# Enhanced Superuser Properties
+ro.superuser.secure=1
+ro.superuser.verify=1
+ro.superuser.protected=1
+EOF
+}
+
+# VMware Support
+setup_vmware() {
+    # Install required packages
+    pkg install -y \
+        qemu-system-x86_64 \
+        qemu-utils \
+        virglrenderer
+        
+    # Create VMware configuration
+    mkdir -p "$SUPERUSER_HOME/vmware"
+    cat > "$SUPERUSER_HOME/vmware/config.json" << EOF
+{
+    "vm_type": "android",
+    "memory": "2048M",
+    "cpu_cores": 2,
+    "graphics": "virgl",
+    "network": "nat"
+}
+EOF
+    
+    # Setup VM network bridge
+    cat > "$SUPERUSER_HOME/vmware/network.conf" << EOF
+allow_host_bridge = true
+enable_vmnet = true
+vmnet_type = nat
+EOF
+}
+
+# Network Improvements
+enhance_network() {
+    # Install additional network tools
+    pkg install -y \
+        mtr \
+        iperf3 \
+        tcpdump \
+        nmap
+        
+    # Configure network optimization
+    cat > "$SUPERUSER_HOME/network/optimization.conf" << EOF
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_congestion_control = bbr
+EOF
+    
+    # Apply network optimizations
+    sysctl -p "$SUPERUSER_HOME/network/optimization.conf"
+    
+    # Setup firewall improvements
+    iptables-save > "$SUPERUSER_HOME/network/iptables.backup"
+    
+    # Add enhanced firewall rules
+    iptables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP
+    iptables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP
+    iptables -A INPUT -f -j DROP
+    iptables -A INPUT -p icmp -m icmp --icmp-type 8 -j DROP
+}
+
+# Update main() function
+main() {
+    echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
+    
+    # System detection
+    detect_system
+    
+    # Setup network
+    setup_network
+    
+    # Configure registry and authentication
+    setup_registry
+    
+    # Setup VMware support
+    setup_vmware
+    
+    # Enhance network
+    enhance_network
+    
+    # Run existing enhancements
+    enhance_superuser
+    
+    echo -e "${COLORS[GREEN]}Installation and configuration completed!${COLORS[NC]}"
+}
+
+# Add to test workflow
+cat << EOF >> .github/workflows/test.yml
+    - name: Test System Detection
+      run: |
+        # Test system info generation
+        if [ ! -f "$SUPERUSER_HOME/system_info.json" ]; then
+          echo "System detection failed"
+          exit 1
+        fi
+        
+        # Test network configuration
+        if [ ! -f "$SUPERUSER_HOME/network/config.json" ]; then
+          echo "Network configuration failed"
+          exit 1
+        fi
+        
+        # Test VMware setup
+        if [ ! -d "$SUPERUSER_HOME/vmware" ]; then
+          echo "VMware setup failed"
+          exit 1
+        fi
+EOF
+
 chmod +x script.sh
 sudo ./script.sh
