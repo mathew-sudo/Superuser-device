@@ -130,3 +130,33 @@ handle_installation_error() {
 if ! check_device_compatibility; then
     echo "Device compatibility check failed. Proceeding with caution..."
 fi
+
+# Add at the beginning of your script
+LOG_FILE="/data/local/tmp/superuser_install.log"
+exec 1> >(tee -a "$LOG_FILE")
+exec 2>&1
+
+# Error handling function
+handle_error() {
+    local last_cmd=$1
+    local last_line=$2
+    
+    echo "Error occurred in command '$last_cmd' on line $last_line"
+    echo "Attempting recovery..."
+    
+    case "$last_cmd" in
+        *"mount"*)
+            echo "Mount operation failed, trying alternative mount points..."
+            # Try alternative mount points
+            ;;
+        *"cp"*)
+            echo "Copy operation failed, trying alternative copy method..."
+            # Try alternative copy method
+            ;;
+        *)
+            echo "Unknown error occurred"
+            ;;
+    esac
+}
+
+trap 'handle_error "${BASH_COMMAND}" "${LINENO}"' ERR
