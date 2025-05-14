@@ -262,6 +262,31 @@ main "$@"
 #!/bin/bash
 set -e
 
+# Custom color scheme for Enhanced Superuser
+background=#000000
+foreground=#00FF00
+cursor=#00FF00
+
+# Normal colors
+color0=#000000
+color1=#FF0000
+color2=#00FF00
+color3=#FFFF00
+color4=#0000FF
+color5=#FF00FF
+color6=#00FFFF
+color7=#FFFFFF
+
+# Bright colors
+color8=#808080
+color9=#FF0000
+color10=#00FF00
+color11=#FFFF00
+color12=#0000FF
+color13=#FF00FF
+color14=#00FFFF
+color15=#FFFFFF
+
 # Version and branding
 VERSION="1.0-prototype"
 BRAND_NAME="Enhanced Superuser Terminal"
