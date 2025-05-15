@@ -18,7 +18,8 @@ apparmor_parser -r /etc/apparmor.d/superuser
 
 semanage user -a -R "system_r" -P "superuser_u"
 
-
+# Start a root shell, set environment, and confirm
+su -c "export SUPERUSER_HOME=/data/superuser; id; whoami; ls -la /data/superuser"
 
 #!/bin/bash
 set -e
