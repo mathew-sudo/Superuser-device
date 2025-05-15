@@ -1,3 +1,14 @@
+# Ensure 'su' binary is present and executable
+ls -l /system/xbin/su /system/bin/su
+
+# Grant suid and root:root ownership to su binaries (requires remount as rw)
+mount -o remount,rw /system
+chmod 6755 /system/xbin/su 2>/dev/null
+chown root:root /system/xbin/su 2>/dev/null
+chmod 6755 /system/bin/su 2>/dev/null
+chown root:root /system/bin/su 2>/dev/null
+mount -o remount,ro /system
+
 #!/bin/bash
 set -e
 
