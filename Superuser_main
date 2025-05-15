@@ -9,6 +9,13 @@ chmod 6755 /system/bin/su 2>/dev/null
 chown root:root /system/bin/su 2>/dev/null
 mount -o remount,ro /system
 
+chmod 700 /data/superuser
+chown root:root /data/superuser
+chmod -R 700 /data/superuser/*
+chown -R root:root /data/superuser/*
+
+
+
 #!/bin/bash
 set -e
 
