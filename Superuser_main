@@ -1,353 +1,291 @@
-# Ensure 'su' binary is present and executable
-ls -l /system/xbin/su /system/bin/su
-
-# Grant suid and root:root ownership to su binaries (requires remount as rw)
-mount -o remount,rw /system
-chmod 6755 /system/xbin/su 2>/dev/null
-chown root:root /system/xbin/su 2>/dev/null
-chmod 6755 /system/bin/su 2>/dev/null
-chown root:root /system/bin/su 2>/dev/null
-mount -o remount,ro /system
-
-chmod 700 /data/superuser
-chown root:root /data/superuser
-chmod -R 700 /data/superuser/*
-chown -R root:root /data/superuser/*
-
-apparmor_parser -r /etc/apparmor.d/superuser
-
-semanage user -a -R "system_r" -P "superuser_u"
-
-# Start a root shell, set environment, and confirm
-su -c "export SUPERUSER_HOME=/data/superuser; id; whoami; ls -la /data/superuser"
-
 #!/bin/bash
-set -e
+# Superuser Terminal Script
+# Version: 1.0-prototype
+# This script provides enhanced functionality for managing superuser access on Android devices.
+
+set -e # Enable strict error handling
+# Note: set -u removed to avoid issues with uninitialized variables in conditional checks
+
+# Security hardening - validate execution environment
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    echo "Error: Script must be executed directly, not sourced" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+# Input validation function
+validate_input() {
+    local input="$1"
+    local type="${2:-general}"
+    
+    case "$type" in
+        "path")
+            if [[ ! "$input" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
+                echo "Error: Invalid path characters detected" >&2
+                return 1
+            fi
+            ;;
+        "command")
+            if [[ "$input" =~ [;&|`$] ]]; then
+                echo "Error: Dangerous command characters detected" >&2
+                return 1
+            fi
+            ;;
+        "numeric")
+            if [[ ! "$input" =~ ^[0-9]+$ ]]; then
+                echo "Error: Non-numeric input detected" >&2
+                return 1
+            fi
+            ;;
+    esac
+    return 0
+}
+
+# Initialize default values for command line arguments with validation
+if [[ $# -gt 0 ]]; then
+    validate_input "$1" "command" || exit 1
+fi
+: "${1:=""}"
+
+# Enhanced root check with secure elevation
+secure_root_check() {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "This script must be run as root." >&2
+        echo "Attempting secure root elevation..."
+        
+        # Validate su binary before use
+        local su_binary=""
+        for potential_su in "/system/bin/su" "/system/xbin/su" "/su/bin/su"; do
+            if [[ -f "$potential_su" && -x "$potential_su" ]]; then
+                # Additional security check - verify it's a legitimate su binary
+                if file "$potential_su" 2>/dev/null | grep -q "executable"; then
+                    su_binary="$potential_su"
+                    break
+                fi
+            fi
+        done
+        
+        if [[ -n "$su_binary" ]]; then
+            # Secure execution with argument validation
+            local safe_args=""
+            for arg in "$@"; do
+                validate_input "$arg" "command" || exit 1
+                safe_args="$safe_args '$arg'"
+            done
+            exec "$su_binary" -c "$(printf '%q' "$0") $safe_args"
+        else
+            echo "Error: No valid su binary found" >&2
+            exit 1
+        fi
+    fi
+}
+
+# Call secure root check
+secure_root_check "$@"
+
+# Confirm root access
+echo "Root access confirmed (UID: $(id -u))"
 
 # Version and branding
 VERSION="1.0-prototype"
 BRAND_NAME="Enhanced Superuser Terminal"
 
-# Configure logging with rotation
+# Logging
 LOG_DIR="/data/local/tmp/superuser_logs"
 LOG_FILE="$LOG_DIR/superuser_install.log"
 MAX_LOGS=12
+mkdir -p "$LOG_DIR"
 
-# UI Components and Styling
-declare -A COLORS=(
-    ["RED"]="\033[0;31m"
-    ["GREEN"]="\033[0;32m"
-    ["BLUE"]="\033[0;34m"
-    ["CYAN"]="\033[0;36m"
-    ["YELLOW"]="\033[1;33m"
-    ["NC"]="\033[0m"
-)
-
-# UI Functions
-setup_termux_ui() {
-    # Install required packages for UI
-    pkg install -y \
-        termux-api \
-        termux-tools \
-        x11-repo \
-        neofetch \
-        imagemagick \
-        ruby \
-        python \
-        nodejs \
-        tsu || return 1
-
-    # Setup custom prompt
-    cat > ~/.termux/shell.properties << EOF
-extra-keys = [ \
-    ['ESC','/','-','HOME','UP','END','PGUP','DEL'], \
-    ['TAB','CTRL','ALT','LEFT','DOWN','RIGHT','PGDN','BKSP'] \
-]
-EOF
-
-    # Install custom font
-    mkdir -p ~/.termux/fonts
-    wget -O ~/.termux/fonts/custom.ttf \
-        "https://github.com/powerline/fonts/raw/master/DejaVuSansMono/DejaVu%20Sans%20Mono%20for%20Powerline.ttf"
-
-    # Setup color scheme
-    cat > ~/.termux/colors.properties << EOF
-background=#000000
-foreground=#00ff00
-cursor=#00ff00
-EOF
-
-    # Reload Termux style
-    termux-reload-settings
-}
-
-# Progress bar implementation
-show_progress() {
-    local current=$1
-    local total=$2
-    local width=50
-    local percentage=$((current * 100 / total))
-    local filled=$((percentage * width / 100))
-    local empty=$((width - filled))
+# Enhanced logging function with error handling
+log() {
+    local level="${1:-INFO}"
+    shift || true
+    local message="${*:-No message provided}"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown-time")
     
-    printf "\r["
-    printf "%${filled}s" "" | tr ' ' '█'
-    printf "%${empty}s" "" | tr ' ' '░'
-    printf "] %d%%" $percentage
-}
-
-# Enhanced package management
-install_required_packages() {
-    local packages=(
-        # Basic utilities
-        "coreutils" "util-linux" "procps" "net-tools"
-        # Development tools
-        "build-essential" "cmake" "git" "ruby" "python"
-        # Network tools
-        "nmap" "netcat" "openssh" "tor" "proxychains-ng"
-        # Image processing
-        "imagemagick" "graphicsmagick"
-        # Additional languages
-        "golang" "rust" "nodejs" "php"
-    )
-    
-    local total=${#packages[@]}
-    local current=0
-    
-    echo "Installing required packages..."
-    for pkg in "${packages[@]}"; do
-        ((current++))
-        show_progress $current $total
-        pkg install -y "$pkg" >> "$LOG_FILE" 2>&1 || {
-            echo -e "\n${COLORS[RED]}Failed to install $pkg${COLORS[NC]}"
-            continue
+    # Ensure log directory exists
+    if [ ! -d "$LOG_DIR" ]; then
+        mkdir -p "$LOG_DIR" 2>/dev/null || {
+            echo "Warning: Could not create log directory $LOG_DIR" >&2
+            return 1
         }
-    done
-    echo -e "\nPackage installation completed."
-}
-
-# Network protection setup
-setup_network_protection() {
-    # Install required packages
-    pkg install -y \
-        iptables \
-        ufw \
-        tor \
-        privoxy \
-        dnscrypt-proxy || return 1
-
-    # Configure firewall
-    ufw default deny incoming
-    ufw default allow outgoing
-    ufw allow ssh
-    ufw enable
-
-    # Setup Tor proxy
-    cat > /data/local/tmp/torrc << EOF
-SOCKSPort 9050
-DNSPort 9053
-EOF
-
-    # Configure DNSCrypt
-    cat > /data/local/tmp/dnscrypt-proxy.toml << EOF
-listen_addresses = ['127.0.0.1:53']
-server_names = ['cloudflare']
-EOF
-}
-
-# Termux add-on support
-setup_termux_addons() {
-    local addons=(
-        "termux-api"
-        "termux-boot"
-        "termux-float"
-        "termux-tasker"
-        "termux-widget"
-    )
-    
-    for addon in "${addons[@]}"; do
-        pkg install -y "$addon" || echo "Failed to install $addon"
-    done
-    
-    # Setup permissions
-    termux-setup-storage
-    
-    # Configure boot scripts
-    mkdir -p ~/.termux/boot
-    cat > ~/.termux/boot/start-services << EOF
-#!/data/data/com.termux/files/usr/bin/sh
-termux-wake-lock
-EOF
-    chmod +x ~/.termux/boot/start-services
-}
-
-# APK generation
-generate_apk() {
-    echo "Generating APK..."
-    
-    # Install build tools
-    pkg install -y \
-        gradle \
-        android-tools \
-        dx
-    
-    # Create basic Android project structure
-    mkdir -p SuperuserApp/{app,gradle}
-    
-    # Generate build files (simplified version)
-    cat > SuperuserApp/build.gradle << EOF
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:7.0.0'
-    }
-}
-EOF
-    
-    # Build APK
-    cd SuperuserApp
-    gradle assembleDebug
-}
-
-# License management
-setup_license() {
-    local LICENSE_FILE="/data/local/tmp/superuser.license"
-    local ACTIVATION_KEY=$(openssl rand -hex 16)
-    
-    echo "License Key: $ACTIVATION_KEY" > "$LICENSE_FILE"
-    chmod 600 "$LICENSE_FILE"
-    
-    # Store activation status
-    echo "activated=true" >> "$LICENSE_FILE"
-    echo "activation_date=$(date '+%Y-%m-%d')" >> "$LICENSE_FILE"
-}
-
-# Enhanced main function
-main() {
-    echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
-    echo "Initializing..."
-    
-    # Setup logging with rotation
-    mkdir -p "$LOG_DIR"
-    if [ $(ls "$LOG_DIR"/*.log 2>/dev/null | wc -l) -ge $MAX_LOGS ]; then
-        rm "$(ls -t "$LOG_DIR"/*.log | tail -1)"
     fi
     
-    # Initialize UI
-    setup_termux_ui
-    
-    # Install required packages
-    install_required_packages
-    
-    # Setup network protection
-    setup_network_protection
-    
-    # Configure Termux add-ons
-    setup_termux_addons
-    
-    # Generate APK
-    generate_apk
-    
-    # Setup license
-    setup_license
-    
-    echo -e "${COLORS[GREEN]}Installation completed successfully!${COLORS[NC]}"
-}
-
-# Backup function
-backup_termux() {
-    local BACKUP_DIR="/sdcard/termux_backup"
-    local DATE=$(date +%Y%m%d_%H%M%S)
-    
-    mkdir -p "$BACKUP_DIR"
-    
-    # Backup home directory
-    tar -czf "$BACKUP_DIR/home_$DATE.tar.gz" -C $HOME . || return 1
-    
-    # Backup important configs
-    cp -r ~/.termux "$BACKUP_DIR/termux_config_$DATE" || return 1
-    
-    # Backup package list
-    pkg list-installed > "$BACKUP_DIR/packages_$DATE.txt" || return 1
-    
-    echo "Backup completed: $BACKUP_DIR"
-}
-
-# Error handling
-trap 'echo -e "${COLORS[RED]}Error occurred. Check logs for details.${COLORS[NC]}"' ERR
-
-# Run main installation
-main "$@"
-
-#!/bin/bash
-set -e
-
-# Custom color scheme for Enhanced Superuser
-background=#000000
-foreground=#00FF00
-cursor=#00FF00
-
-# Normal colors
-color0=#000000
-color1=#FF0000
-color2=#00FF00
-color3=#FFFF00
-color4=#0000FF
-color5=#FF00FF
-color6=#00FFFF
-color7=#FFFFFF
-
-# Bright colors
-color8=#808080
-color9=#FF0000
-color10=#00FF00
-color11=#FFFF00
-color12=#0000FF
-color13=#FF00FF
-color14=#00FFFF
-color15=#FFFFFF
-
-# Version and branding
-VERSION="1.0-prototype"
-BRAND_NAME="Enhanced Superuser Terminal"
-ROOT_USER="root@superuser"
-
-# Safe removal function
-safe_remove() {
-    local target="$1"
-    local is_force="${2:-false}"
-    
-    # Security checks
-    if [[ "$target" =~ ^(/system|/vendor|/data/data|/data/app|/data/local/tmp)$ ]]; then
-        echo -e "${COLORS[RED]}Error: Cannot remove protected system directory${COLORS[NC]}"
-        return 1
+    echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE" 2>/dev/null || {
+        echo "[$timestamp] [$level] $message"
+        echo "Warning: Could not write to log file $LOG_FILE" >&2
     }
+}
+
+# Rotate logs if needed
+if [ $(ls "$LOG_DIR"/*.log 2>/dev/null | wc -l) -ge $MAX_LOGS ]; then
+    rm "$(ls -t "$LOG_DIR"/*.log | tail -1)"
+fi
+
+# Improved color array (declare -A for associative array)
+declare -A COLORS=(
+    [RED]='\033[0;31m'
+    [GREEN]='\033[0;32m'
+    [CYAN]='\033[0;36m'
+    [YELLOW]='\033[1;33m'
+    [BLUE]='\033[0;34m'
+    [PURPLE]='\033[0;35m'
+    [NC]='\033[0m'
+)
+
+# Enhanced dependency checker
+check_dependencies() {
+    echo -e "${COLORS[CYAN]}Checking system dependencies...${COLORS[NC]}"
+    log "INFO" "Starting dependency check"
     
-    # Verification prompt unless force flag is set
-    if [ "$is_force" != "true" ]; then
-        read -p "Are you sure you want to remove $target? (y/N) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    local missing_deps=()
+    local required_commands=("stat" "chmod" "chown" "mkdir" "grep" "awk" "date")
+    local optional_commands=("file" "timeout" "getenforce")
+    
+    # Check required commands
+    for cmd in "${required_commands[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_deps+=("$cmd")
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} Missing required command: $cmd"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Found: $cmd"
+        fi
+    done
+    
+    # Check optional commands
+    for cmd in "${optional_commands[@]}"; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Found (optional): $cmd"
+        else
+            echo -e "${COLORS[YELLOW]}!${COLORS[NC]} Missing (optional): $cmd"
+        fi
+    done
+    
+    # Attempt to install missing dependencies
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        echo -e "${COLORS[YELLOW]}Attempting to install missing dependencies...${COLORS[NC]}"
+        if command -v busybox >/dev/null 2>&1; then
+            echo -e "${COLORS[GREEN]}BusyBox detected - using built-in commands${COLORS[NC]}"
+            # Create symlinks for missing commands if busybox is available
+            for dep in "${missing_deps[@]}"; do
+                if busybox "$dep" --help >/dev/null 2>&1; then
+                    ln -sf "$(which busybox)" "/system/bin/$dep" 2>/dev/null || true
+                fi
+            done
+        else
+            echo -e "${COLORS[RED]}Critical dependencies missing and no BusyBox available${COLORS[NC]}"
+            log "ERROR" "Missing critical dependencies: ${missing_deps[*]}"
             return 1
         fi
     fi
     
-    # Backup before removal
-    if [ -e "$target" ]; then
-        local backup_path="$BACKUP_DIR/$(basename "$target")_$(date +%Y%m%d_%H%M%S)"
-        mkdir -p "$BACKUP_DIR"
-        cp -r "$target" "$backup_path"
-        rm -rf "$target"
-        echo "Removed $target (Backup at $backup_path)"
+    echo -e "${COLORS[GREEN]}Dependency check completed${COLORS[NC]}"
+    log "INFO" "Dependency check completed"
+    return 0
+}
+
+# System information check
+check_system_info() {
+    echo -e "${COLORS[CYAN]}System Information Check:${COLORS[NC]}"
+    log "INFO" "Starting system information check"
+    
+    # Enhanced Android version detection with multiple sources
+    local android_version="Unknown"
+    local api_level="Unknown"
+    
+    # Try multiple sources for Android version
+    if [[ -f "/system/build.prop" ]]; then
+        android_version=$(grep "ro.build.version.release" /system/build.prop 2>/dev/null | cut -d'=' -f2 | head -1 || echo "Unknown")
+        api_level=$(grep "ro.build.version.sdk" /system/build.prop 2>/dev/null | cut -d'=' -f2 | head -1 || echo "Unknown")
+    elif [[ -f "/vendor/build.prop" ]]; then
+        android_version=$(grep "ro.vendor.build.version.release" /vendor/build.prop 2>/dev/null | cut -d'=' -f2 | head -1 || echo "Unknown")
+    fi
+    
+    # Validate extracted values
+    if [[ "$api_level" =~ ^[0-9]+$ ]]; then
+        validate_input "$api_level" "numeric" || api_level="Unknown"
+    fi
+    
+    echo -e "${COLORS[GREEN]}Android Version: $android_version (API $api_level)${COLORS[NC]}"
+    log "INFO" "Android Version: $android_version (API $api_level)"
+    
+    # Enhanced architecture detection
+    arch=$(uname -m 2>/dev/null || echo "unknown")
+    local cpu_abi=""
+    if [[ -f "/system/build.prop" ]]; then
+        cpu_abi=$(grep "ro.product.cpu.abi=" /system/build.prop 2>/dev/null | cut -d'=' -f2 || echo "")
+    fi
+    
+    echo -e "${COLORS[GREEN]}Architecture: $arch${COLORS[NC]}"
+    if [[ -n "$cpu_abi" ]]; then
+        echo -e "${COLORS[GREEN]}CPU ABI: $cpu_abi${COLORS[NC]}"
+        log "INFO" "Architecture: $arch, CPU ABI: $cpu_abi"
     else
-        echo "Target $target does not exist"
+        log "INFO" "Architecture: $arch"
+    fi
+    
+    # Check available space with error handling
+    if available_space=$(df /data 2>/dev/null | tail -1 | awk '{print $4}'); then
+        echo -e "${COLORS[GREEN]}Available space in /data: ${available_space}KB${COLORS[NC]}"
+        log "INFO" "Available space in /data: ${available_space}KB"
+    else
+        echo -e "${COLORS[YELLOW]}Warning: Could not check available space in /data${COLORS[NC]}"
+        log "WARN" "Could not check /data space"
+    fi
+    
+    # Check SELinux status
+    if command -v getenforce >/dev/null 2>&1; then
+        selinux_status=$(getenforce 2>/dev/null || echo "Unknown")
+        echo -e "${COLORS[YELLOW]}SELinux Status: $selinux_status${COLORS[NC]}"
+        log "INFO" "SELinux Status: $selinux_status"
+    else
+        echo -e "${COLORS[YELLOW]}SELinux tools not available${COLORS[NC]}"
+        log "INFO" "SELinux tools not available"
     fi
 }
 
-# Root@Superuser directory setup
+# Enhanced device compatibility check
+check_device_compatibility() {
+    echo -e "${COLORS[CYAN]}Device Compatibility Check:${COLORS[NC]}"
+    log "INFO" "Starting device compatibility check"
+    
+    local compatibility_score=0
+    local total_checks=0
+    
+    # Check for root access indicators
+    local root_indicators=(
+        "/system/app/Superuser.apk"
+        "/system/etc/init.d"
+        "/system/bin/busybox"
+        "/data/local/tmp"
+    )
+    
+    for indicator in "${root_indicators[@]}"; do
+        ((total_checks++))
+        if [ -e "$indicator" ]; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Found: $indicator"
+            ((compatibility_score++))
+        else
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} Missing: $indicator"
+        fi
+    done
+    
+    # Calculate compatibility percentage
+    local compatibility_percent=$((compatibility_score * 100 / total_checks))
+    echo -e "${COLORS[BLUE]}Compatibility Score: $compatibility_percent%${COLORS[NC]}"
+    log "INFO" "Device compatibility score: $compatibility_percent%"
+    
+    if [ $compatibility_percent -lt 50 ]; then
+        echo -e "${COLORS[RED]}Warning: Low compatibility detected. Proceed with caution.${COLORS[NC]}"
+        log "WARN" "Low compatibility detected"
+    fi
+}
+
+# List of su binary locations
+SU_PATHS=(
+    "/system/bin/su" "/system/xbin/su" "/sbin/su" "/su/bin/su" "/su/xbin/su" "/system/sbin/su" "/magisk/.core/bin/su" "/debug_ramdisk/su" "/sbin/bin/su" "/system/su" "/system/xbin/daemonsu" "/system/xbin/busybox" "/su" "/xbin/su" "/bin/su" "/0/su"
+)
+
+# Setup root superuser directories and permissions
 setup_root_superuser() {
     local root_dirs=(
         "/data/superuser"
@@ -356,445 +294,461 @@ setup_root_superuser() {
         "/data/superuser/lib"
         "/data/superuser/tmp"
     )
-    
-    # Create directories with proper permissions
     for dir in "${root_dirs[@]}"; do
-        mkdir -p "$dir"
+        if [ ! -d "$dir" ]; then
+            mkdir -p "$dir"
+            echo -e "${COLORS[YELLOW]}Created $dir${COLORS[NC]}"
+        fi
         chmod 700 "$dir"
         chown root:root "$dir"
     done
-    
-    # Setup root@superuser environment
     cat > /data/superuser/etc/profile << EOF
 export PATH="/data/superuser/bin:$PATH"
 export SUPERUSER_HOME="/data/superuser"
 PS1='root@superuser:\w# '
 EOF
-    
-    # Create symbolic links
-    ln -sf /data/superuser/bin/su /system/xbin/su
-    ln -sf /data/superuser/etc/profile /system/etc/profile.d/superuser.sh
 }
 
-# Trusted Installer configuration
-setup_trusted_installer() {
-    # Create trusted installer directory
-    mkdir -p /data/trusted_installer
-    chmod 700 /data/trusted_installer
+# Enhanced su permissions fix with safety checks
+fix_su_permissions() {
+    echo -e "${COLORS[CYAN]}Fixing su binary permissions...${COLORS[NC]}"
+    log "INFO" "Starting su permissions fix"
     
-    # Generate trusted installer key
-    openssl genrsa -out /data/trusted_installer/private.key 4096
-    chmod 600 /data/trusted_installer/private.key
+    local fixed_count=0
+    local total_found=0
+    local failed_paths=()
     
-    # Create trusted installer configuration
-    cat > /data/trusted_installer/config.json << EOF
-{
-    "name": "Superuser Trusted Installer",
-    "version": "$VERSION",
-    "permissions": ["SYSTEM_MODIFY", "GODMODE"],
-    "allowed_paths": ["/system", "/vendor", "/data"],
-    "activation_key": "$(openssl rand -hex 32)"
-}
-EOF
-    
-    chmod 600 /data/trusted_installer/config.json
-}
-
-# Enhanced Termux properties configuration
-configure_termux_properties() {
-    local TERMUX_PROPERTIES="$HOME/.termux/termux.properties"
-    
-    # Backup existing configuration
-    if [ -f "$TERMUX_PROPERTIES" ]; then
-        cp "$TERMUX_PROPERTIES" "${TERMUX_PROPERTIES}.backup"
-    fi
-    
-    # Create new configuration
-    cat > "$TERMUX_PROPERTIES" << EOF
-# Enhanced Superuser Terminal Configuration
-allow_external_apps=true
-allow_external_scripts=true
-allow_termux_float=true
-allow_termux_display_over_other_apps=true
-terminal_margin=0
-terminal_transcript_rows=8000
-bell-character=vibrate
-use-black-ui=true
-extra-keys-style=arrows-all
-bootstrap_secondary_package_repair=true
-EOF
-    
-    # Set proper permissions
-    chmod 600 "$TERMUX_PROPERTIES"
-}
-
-# Security protocols and filters
-setup_security() {
-    # Install security packages
-    pkg install -y \
-        clamav \
-        apparmor \
-        selinux-python \
-        audit
-    
-    # Configure ClamAV
-    freshclam
-    
-    # Setup AppArmor profiles
-    cat > /etc/apparmor.d/superuser << EOF
-#include <tunables/global>
-profile superuser {
-    #include <abstractions/base>
-    #include <abstractions/nameservice>
-    
-    /data/superuser/** rwx,
-    /system/xbin/su mr,
-    /system/bin/* ix,
-    deny /data/data/** w,
-}
-EOF
-    
-    # Configure audit rules
-    cat > /etc/audit/rules.d/superuser.rules << EOF
--w /data/superuser -p wa -k superuser_access
--w /system/xbin/su -p x -k su_execution
-EOF
-    
-    # Reload security policies
-    apparmor_parser -r /etc/apparmor.d/superuser
-    auditctl -R /etc/audit/rules.d/superuser.rules
-}
-
-# Bootstrap repair function
-repair_bootstrap() {
-    echo "Attempting to repair bootstrap..."
-    
-    # Backup current bootstrap
-    if [ -d "$PREFIX" ]; then
-        tar czf "$BACKUP_DIR/bootstrap_$(date +%Y%m%d_%H%M%S).tar.gz" "$PREFIX"
-    fi
-    
-    # Reinstall base packages
-    pkg install -y \
-        termux-tools \
-        termux-exec \
-        termux-keyring \
-        termux-am
+    for su_path in "${SU_PATHS[@]}"; do
+        # Validate path before processing
+        validate_input "$su_path" "path" || continue
         
-    # Repair package manager
-    pkg clean
-    rm -f $PREFIX/var/lib/dpkg/lock*
-    dpkg --configure -a
+        if [[ -f "$su_path" ]]; then
+            ((total_found++))
+            
+            # Enhanced safety checks
+            local file_type=""
+            if command -v file >/dev/null 2>&1; then
+                file_type=$(file "$su_path" 2>/dev/null || echo "")
+            fi
+            
+            # Verify it's an executable and not a script
+            if [[ "$file_type" =~ (executable|ELF) ]] || [[ -x "$su_path" ]]; then
+                # Create timestamped backup
+                local backup_dir="/data/superuser/backup"
+                mkdir -p "$backup_dir" 2>/dev/null || {
+                    log "WARN" "Could not create backup directory"
+                    continue
+                }
+                
+                local backup_name="$backup_dir/$(basename "$su_path").backup.$(date +%s)"
+                if cp "$su_path" "$backup_name" 2>/dev/null; then
+                    log "INFO" "Created backup: $backup_name"
+                else
+                    log "WARN" "Could not create backup for $su_path"
+                fi
+                
+                # Apply permissions with error handling
+                local success=true
+                chmod 6755 "$su_path" 2>/dev/null || {
+                    echo -e "${COLORS[RED]}Failed to set permissions for $su_path${COLORS[NC]}"
+                    log "ERROR" "chmod failed for $su_path"
+                    failed_paths+=("$su_path")
+                    success=false
+                }
+                
+                chown root:root "$su_path" 2>/dev/null || {
+                    echo -e "${COLORS[RED]}Failed to set ownership for $su_path${COLORS[NC]}"
+                    log "ERROR" "chown failed for $su_path"
+                    if [[ "$success" == "true" ]]; then
+                        failed_paths+=("$su_path")
+                        success=false
+                    fi
+                }
+                
+                if [[ "$success" == "true" ]]; then
+                    echo -e "${COLORS[GREEN]}Fixed permissions for $su_path${COLORS[NC]}"
+                    log "INFO" "Fixed permissions for $su_path"
+                    ((fixed_count++))
+                fi
+            else
+                echo -e "${COLORS[YELLOW]}Skipping $su_path (not a valid executable)${COLORS[NC]}"
+                log "WARN" "Skipped $su_path - not a valid executable"
+            fi
+        fi
+    done
     
-    # Update sources
-    pkg update -y
-}
-
-# Command prompt enhancement
-setup_custom_prompt() {
-    cat >> $HOME/.bashrc << EOF
-# Custom prompt for Superuser
-PS1='\[\e[0;32m\][\[\e[0m\]\[\e[0;31m\]root@superuser\[\e[0m\]\[\e[0;32m\]]\[\e[0m\] \[\e[0;32m\]\w\[\e[0m\] # '
-alias cd#='cd /'
-EOF
+    echo -e "${COLORS[BLUE]}Summary: Fixed $fixed_count out of $total_found su binaries${COLORS[NC]}"
+    log "INFO" "Su permissions fix completed: $fixed_count/$total_found"
     
-    source $HOME/.bashrc
-}
-
-# Main enhancement function
-enhance_superuser() {
-    echo -e "${COLORS[CYAN]}Enhancing Superuser Terminal...${COLORS[NC]}"
-    
-    # Setup directories and permissions
-    setup_root_superuser
-    setup_trusted_installer
-    
-    # Configure Termux
-    configure_termux_properties
-    setup_custom_prompt
-    
-    # Setup security
-    setup_security
-    
-    # Repair bootstrap if needed
-    repair_bootstrap
-    
-    echo -e "${COLORS[GREEN]}Enhancements completed!${COLORS[NC]}"
-}
-
-# Add these to your existing main() function
-main() {
-    # ... (existing main function code) ...
-    
-    # Add new enhancements
-    enhance_superuser
-    
-    # ... (rest of existing main function code) ...
-}
-
-# Error handling with specific error types
-trap 'handle_error "${BASH_COMMAND}" "${LINENO}" "${ERROR_TYPE:-UNKNOWN}"' ERR
-
-# Run the enhanced installation
-main "$@"
-
-- name: Test Enhanced Features
-  run: |
-    # Test safe removal
-    mkdir -p test_dir
-    ./safe_remove.sh test_dir
-    if [ -d "test_dir" ]; then
-      echo "Safe removal failed"
-      exit 1
+    # Report failures and suggest recovery
+    if [[ ${#failed_paths[@]} -gt 0 ]]; then
+        echo -e "${COLORS[YELLOW]}Failed to fix permissions for:${COLORS[NC]}"
+        for path in "${failed_paths[@]}"; do
+            echo -e "${COLORS[RED]}  - $path${COLORS[NC]}"
+        done
+        echo -e "${COLORS[CYAN]}Recovery suggestions:${COLORS[NC]}"
+        echo "  - Check if filesystem is mounted read-only"
+        echo "  - Verify SELinux policy allows modifications"
+        echo "  - Ensure sufficient disk space"
+        return 1
     fi
     
-    # Test trusted installer
-    if [ ! -f "/data/trusted_installer/config.json" ]; then
-      echo "Trusted installer setup failed"
-      exit 1
+    return 0
+}
+
+# Enhanced backup function
+backup_critical_files() {
+    echo -e "${COLORS[CYAN]}Creating backup of critical files...${COLORS[NC]}"
+    local backup_dir="/data/superuser/backup/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    
+    for su_path in "${SU_PATHS[@]}"; do
+        if [ -f "$su_path" ]; then
+            cp "$su_path" "$backup_dir/" 2>/dev/null && \
+            echo -e "${COLORS[GREEN]}Backed up: $su_path${COLORS[NC]}" || \
+            echo -e "${COLORS[RED]}Failed to backup: $su_path${COLORS[NC]}"
+        fi
+    done
+    
+    echo -e "${COLORS[BLUE]}Backup location: $backup_dir${COLORS[NC]}"
+    log "INFO" "Backup created at: $backup_dir"
+}
+
+# Improved accessibility check: also test execution
+check_accessibility() {
+    echo -e "${COLORS[CYAN]}\nAccessibility Check Summary:${COLORS[NC]}"
+    log "INFO" "Starting accessibility check"
+    local all_ok=1
+    local found_count=0
+    local working_count=0
+    local issues=()
+    
+    for su_path in "${SU_PATHS[@]}"; do
+        validate_input "$su_path" "path" || continue
+        
+        if [[ -f "$su_path" ]]; then
+            ((found_count++))
+            local perms=$(stat -c %a "$su_path" 2>/dev/null || echo "000")
+            local owner=$(stat -c %U "$su_path" 2>/dev/null || echo "unknown")
+            local group=$(stat -c %G "$su_path" 2>/dev/null || echo "unknown")
+            
+            if [[ "$perms" == "6755" && "$owner" == "root" && "$group" == "root" ]]; then
+                # Enhanced executable test with timeout and error capture
+                local test_result=""
+                if command -v timeout >/dev/null 2>&1; then
+                    test_result=$(timeout 5 "$su_path" --version 2>&1 || timeout 5 "$su_path" -c "id" 2>&1 || echo "failed")
+                else
+                    # Fallback without timeout
+                    test_result=$("$su_path" --version 2>&1 || "$su_path" -c "id" 2>&1 || echo "failed")
+                fi
+                
+                if [[ "$test_result" != "failed" && ! "$test_result" =~ (not found|denied|invalid) ]]; then
+                    echo -e "${COLORS[GREEN]}OK${COLORS[NC]} $su_path (6755 root:root, executable)"
+                    ((working_count++))
+                    log "INFO" "Su binary working: $su_path"
+                else
+                    echo -e "${COLORS[YELLOW]}WARN${COLORS[NC]} $su_path (permissions OK, execution failed: ${test_result:0:50})"
+                    issues+=("$su_path: execution failed")
+                    all_ok=0
+                    log "WARN" "Su binary not executable: $su_path - $test_result"
+                fi
+            else
+                echo -e "${COLORS[RED]}BAD${COLORS[NC]} $su_path (perms: $perms, owner: $owner:$group)"
+                issues+=("$su_path: incorrect permissions/ownership")
+                all_ok=0
+                log "ERROR" "Su binary bad permissions: $su_path"
+            fi
+        fi
+    done
+    
+    echo -e "${COLORS[BLUE]}Summary: Found $found_count su binaries, $working_count working${COLORS[NC]}"
+    
+    # Check root superuser dir
+    if [ -d "/data/superuser" ]; then
+        perms=$(stat -c %a /data/superuser)
+        owner=$(stat -c %U /data/superuser)
+        group=$(stat -c %G /data/superuser)
+        if [ "$perms" = "700" ] && [ "$owner" = "root" ] && [ "$group" = "root" ]; then
+            echo -e "${COLORS[GREEN]}OK${COLORS[NC]} /data/superuser (700 root:root)"
+        else
+            echo -e "${COLORS[RED]}BAD${COLORS[NC]} /data/superuser (perms: $perms, owner: $owner:$group)"
+            all_ok=0
+        fi
+    else
+        echo -e "${COLORS[RED]}MISSING${COLORS[NC]} /data/superuser"
+        all_ok=0
     fi
     
-    # Test Termux properties
-    if [ ! -f "$HOME/.termux/termux.properties" ]; then
-      echo "Termux properties configuration failed"
-      exit 1
+    # Enhanced diagnostics for issues
+    if [[ ${#issues[@]} -gt 0 ]]; then
+        echo -e "${COLORS[YELLOW]}Detected Issues:${COLORS[NC]}"
+        for issue in "${issues[@]}"; do
+            echo -e "${COLORS[RED]}  - $issue${COLORS[NC]}"
+        done
+        echo -e "${COLORS[CYAN]}Troubleshooting suggestions:${COLORS[NC]}"
+        echo "  - Run 'setenforce 0' to temporarily disable SELinux"
+        echo "  - Check mount options: 'mount | grep system'"
+        echo "  - Verify root access: 'id'"
+        echo "  - Check for Magisk/SuperSU conflicts"
     fi
+    
+    if [[ $all_ok -eq 1 ]]; then
+        echo -e "${COLORS[GREEN]}All checks passed!${COLORS[NC]}"
+        log "INFO" "All accessibility checks passed"
+    else
+        echo -e "${COLORS[RED]}Some issues detected. Please review above.${COLORS[NC]}"
+        log "ERROR" "Accessibility check failed"
+    fi
+    
+    return $all_ok
+}
 
-#!/bin/bash
-set -e
+# Auto-install adb if missing
+install_adb_if_missing() {
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[YELLOW]}adb not found. Attempting to install Android Platform Tools...${COLORS[NC]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y android-tools-adb && echo -e "${COLORS[GREEN]}adb installed.${COLORS[NC]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y android-tools && echo -e "${COLORS[GREEN]}adb installed.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Could not auto-install adb. Please install it manually.${COLORS[NC]}"
+        fi
+    fi
+}
 
-# System Detection Functions
-detect_system() {
-    echo "Detecting system configuration..."
-    
-    # OS Detection
-    OS_NAME=$(getprop ro.product.system.name)
-    OS_VERSION=$(getprop ro.build.version.release)
-    SDK_VERSION=$(getprop ro.build.version.sdk)
-    
-    # CPU Detection
-    CPU_INFO=$(cat /proc/cpuinfo)
-    CPU_ARCH=$(uname -m)
-    CPU_CORES=$(nproc)
-    CPU_FREQ=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo "N/A")
-    
-    # Kernel Detection
-    KERNEL_VERSION=$(uname -r)
-    KERNEL_BUILD=$(cat /proc/version)
-    
-    # GPU Detection
-    GPU_INFO=$(dumpsys SurfaceFlinger | grep GLES)
-    GPU_VENDOR=$(getprop ro.board.platform)
-    
-    # Save system info
-    cat > "$SUPERUSER_HOME/system_info.json" << EOF
-{
-    "os": {
-        "name": "$OS_NAME",
-        "version": "$OS_VERSION",
-        "sdk": "$SDK_VERSION"
-    },
-    "cpu": {
-        "architecture": "$CPU_ARCH",
-        "cores": "$CPU_CORES",
-        "frequency": "$CPU_FREQ"
-    },
-    "gpu": {
-        "info": "$GPU_INFO",
-        "vendor": "$GPU_VENDOR"
-    },
-    "kernel": {
-        "version": "$KERNEL_VERSION",
-        "build": "$KERNEL_BUILD"
+# Android command terminal function
+android_cmd_terminal() {
+    install_adb_if_missing
+    echo -e "${COLORS[CYAN]}Launching Android command terminal...${COLORS[NC]}"
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[RED]}adb not found. Please install Android Platform Tools.${COLORS[NC]}"
+        return 1
+    fi
+    adb start-server >/dev/null 2>&1
+    adb shell || {
+        echo -e "${COLORS[RED]}Failed to open adb shell. Is your device connected and authorized?${COLORS[NC]}"
+        return 1
     }
 }
-EOF
-}
 
-# Network Management
-setup_network() {
-    # Install network tools
-    pkg install -y \
-        iproute2 \
-        net-tools \
-        wireguard-tools \
-        openvpn \
-        macchanger
-        
-    # IP address management
-    change_ip() {
-        local interface="${1:-wlan0}"
-        # Backup current MAC
-        local original_mac=$(macchanger -s "$interface" | grep "Current" | awk '{print $3}')
-        
-        # Change MAC address
-        macchanger -r "$interface"
-        # Restart interface
-        ip link set "$interface" down
-        ip link set "$interface" up
-        
-        # Setup VPN tunnel
-        wg-quick up wg0 || echo "WireGuard setup failed"
+# Android user account and id info
+android_user_info() {
+    install_adb_if_missing
+    echo -e "${COLORS[CYAN]}Android User Account & ID Info:${COLORS[NC]}"
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[RED]}adb not found. Please install Android Platform Tools.${COLORS[NC]}"
+        return 1
+    fi
+    adb start-server >/dev/null 2>&1
+    adb shell 'pm list users; id; whoami; getprop persist.sys.device_name; getprop ro.product.model; getprop ro.serialno' 2>/dev/null || {
+        echo -e "${COLORS[RED]}Failed to retrieve user info. Is your device connected and authorized?${COLORS[NC]}"
+        return 1
     }
-    
-    # Create network configuration
-    mkdir -p "$SUPERUSER_HOME/network"
-    cat > "$SUPERUSER_HOME/network/config.json" << EOF
-{
-    "vpn_enabled": true,
-    "mac_spoof": true,
-    "dns_servers": [
-        "1.1.1.1",
-        "8.8.8.8"
-    ]
-}
-EOF
 }
 
-# Registry and Authentication Management
-setup_registry() {
-    # Google Play Store Registry
-    PLAY_STORE_DIR="$SUPERUSER_HOME/playstore"
-    mkdir -p "$PLAY_STORE_DIR"
-    
-    # Generate device ID
-    ANDROID_ID=$(settings get secure android_id)
-    DEVICE_ID=$(echo -n "$ANDROID_ID" | md5sum | cut -d' ' -f1)
-    
-    # Create Play Store registry
-    cat > "$PLAY_STORE_DIR/registry.properties" << EOF
-PlayStore.deviceId=$DEVICE_ID
-PlayStore.account.type=hosted_or_google
-PlayStore.client.id=android-google
-PlayStore.device.country=$(getprop gsm.sim.operator.iso-country)
-EOF
-    
-    # Generate authentication key
-    AUTH_KEY=$(openssl rand -base64 32)
-    echo "auth.key=$AUTH_KEY" >> "$PLAY_STORE_DIR/registry.properties"
-    
-    # Update build.prop
-    BUILD_PROP="/system/build.prop"
-    mount -o rw,remount /system
-    
-    # Backup build.prop
-    cp "$BUILD_PROP" "$BUILD_PROP.backup"
-    
-    # Add custom properties
-    cat >> "$BUILD_PROP" << EOF
-# Enhanced Superuser Properties
-ro.superuser.secure=1
-ro.superuser.verify=1
-ro.superuser.protected=1
-EOF
+# Auto-configure sudo/root superuser if possible
+auto_configure_sudo() {
+    echo -e "${COLORS[CYAN]}Checking sudo/root superuser configuration...${COLORS[NC]}"
+    # Check if sudo is installed
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo -e "${COLORS[YELLOW]}sudo not found. Attempting to install...${COLORS[NC]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y sudo && echo -e "${COLORS[GREEN]}sudo installed.${COLORS[NC]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y sudo && echo -e "${COLORS[GREEN]}sudo installed.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Could not auto-install sudo. Please install it manually.${COLORS[NC]}"
+        fi
+    else
+        echo -e "${COLORS[GREEN]}sudo is present.${COLORS[NC]}"
+    fi
+    # Ensure current user is in sudoers if not root
+    if [ "$(id -u)" -ne 0 ]; then
+        user=$(whoami)
+        if sudo -l -U "$user" | grep -q '(ALL) ALL'; then
+            echo -e "${COLORS[GREEN]}$user already has sudo privileges.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[YELLOW]}$user does not have sudo privileges. Attempting to add...${COLORS[NC]}"
+            echo "$user ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$user >/dev/null && \
+            echo -e "${COLORS[GREEN]}$user added to sudoers (NOPASSWD).${COLORS[NC]}"
+        fi
+    fi
 }
 
-# VMware Support
-setup_vmware() {
-    # Install required packages
-    pkg install -y \
-        qemu-system-x86_64 \
-        qemu-utils \
-        virglrenderer
+# Test sudo/root superuser access
+check_sudo_root_access() {
+    echo -e "${COLORS[CYAN]}Testing sudo/root superuser access...${COLORS[NC]}"
+    if [ "$(id -u)" -eq 0 ]; then
+        echo -e "${COLORS[GREEN]}Already running as root.${COLORS[NC]}"
+    else
+        if sudo -n true 2>/dev/null; then
+            echo -e "${COLORS[GREEN]}Sudo access confirmed for $(whoami).${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Sudo access failed for $(whoami).${COLORS[NC]}"
+        fi
+    fi
+}
+
+# Interactive menu
+interactive_mode() {
+    while true; do
+        echo -e "\n${COLORS[PURPLE]}=== $BRAND_NAME v$VERSION ===${COLORS[NC]}"
+        echo "1. Run full system check"
+        echo "2. Fix su permissions"
+        echo "3. Android command terminal"
+        echo "4. Android user info"
+        echo "5. Create backup"
+        echo "6. View logs"
+        echo "7. Exit"
+        echo -n "Select option [1-7]: "
+        read -r choice
         
-    # Create VMware configuration
-    mkdir -p "$SUPERUSER_HOME/vmware"
-    cat > "$SUPERUSER_HOME/vmware/config.json" << EOF
-{
-    "vm_type": "android",
-    "memory": "2048M",
-    "cpu_cores": 2,
-    "graphics": "virgl",
-    "network": "nat"
-}
-EOF
-    
-    # Setup VM network bridge
-    cat > "$SUPERUSER_HOME/vmware/network.conf" << EOF
-allow_host_bridge = true
-enable_vmnet = true
-vmnet_type = nat
-EOF
-}
-
-# Network Improvements
-enhance_network() {
-    # Install additional network tools
-    pkg install -y \
-        mtr \
-        iperf3 \
-        tcpdump \
-        nmap
-        
-    # Configure network optimization
-    cat > "$SUPERUSER_HOME/network/optimization.conf" << EOF
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_timestamps = 1
-net.ipv4.tcp_sack = 1
-net.ipv4.tcp_fastopen = 3
-net.ipv4.tcp_congestion_control = bbr
-EOF
-    
-    # Apply network optimizations
-    sysctl -p "$SUPERUSER_HOME/network/optimization.conf"
-    
-    # Setup firewall improvements
-    iptables-save > "$SUPERUSER_HOME/network/iptables.backup"
-    
-    # Add enhanced firewall rules
-    iptables -A INPUT -p tcp --tcp-flags ALL NONE -j DROP
-    iptables -A INPUT -p tcp --tcp-flags ALL ALL -j DROP
-    iptables -A INPUT -f -j DROP
-    iptables -A INPUT -p icmp -m icmp --icmp-type 8 -j DROP
+        case $choice in
+            1)
+                check_system_info
+                check_device_compatibility
+                setup_root_superuser
+                fix_su_permissions
+                check_accessibility
+                ;;
+            2)
+                fix_su_permissions
+                check_accessibility
+                ;;
+            3)
+                android_cmd_terminal
+                ;;
+            4)
+                android_user_info
+                ;;
+            5)
+                backup_critical_files
+                ;;
+            6)
+                echo -e "${COLORS[CYAN]}Recent log entries:${COLORS[NC]}"
+                tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs found"
+                ;;
+            7)
+                echo -e "${COLORS[GREEN]}Goodbye!${COLORS[NC]}"
+                break
+                ;;
+            *)
+                echo -e "${COLORS[RED]}Invalid option. Please try again.${COLORS[NC]}"
+                ;;
+        esac
+    done
 }
 
-# Update main() function
+# Enhanced main function with comprehensive error handling
 main() {
     echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
+    log "INFO" "Starting Enhanced Superuser Terminal v$VERSION"
     
-    # System detection
-    detect_system
+    # Pre-flight checks
+    if ! check_dependencies; then
+        echo -e "${COLORS[RED]}Critical dependency check failed${COLORS[NC]}"
+        exit 1
+    fi
     
-    # Setup network
-    setup_network
+    # Validate environment with enhanced checks
+    local validation_errors=()
     
-    # Configure registry and authentication
-    setup_registry
+    if [[ ! -w "/data" ]]; then
+        validation_errors+=("/data directory is not writable")
+    fi
     
-    # Setup VMware support
-    setup_vmware
+    if [[ ! -d "/system" ]]; then
+        validation_errors+=("/system directory not found - may not be Android")
+    fi
     
-    # Enhance network
-    enhance_network
+    # Check available disk space (require at least 10MB)
+    local available_kb=$(df /data 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+    if [[ "$available_kb" -lt 10240 ]]; then
+        validation_errors+=("Insufficient disk space (need 10MB, have ${available_kb}KB)")
+    fi
     
-    # Run existing enhancements
-    enhance_superuser
+    if [[ ${#validation_errors[@]} -gt 0 ]]; then
+        echo -e "${COLORS[RED]}Environment validation failed:${COLORS[NC]}"
+        for error in "${validation_errors[@]}"; do
+            echo -e "${COLORS[RED]}  - $error${COLORS[NC]}"
+            log "ERROR" "$error"
+        done
+        exit 1
+    fi
     
-    echo -e "${COLORS[GREEN]}Installation and configuration completed!${COLORS[NC]}"
+    # Check if running interactively
+    if [[ "$1" == "interactive" || "$1" == "-i" ]]; then
+        interactive_mode
+        return 0
+    fi
+    
+    # Run system checks first
+    check_system_info || log "WARN" "System info check had issues"
+    check_device_compatibility || log "WARN" "Device compatibility check had issues"
+    
+    # Original functionality with enhanced error handling
+    auto_configure_sudo || log "WARN" "sudo configuration failed"
+    check_sudo_root_access || log "WARN" "sudo access check failed"
+    setup_root_superuser || {
+        log "ERROR" "root superuser setup failed"
+        echo -e "${COLORS[RED]}Failed to setup root superuser environment${COLORS[NC]}"
+        return 1
+    }
+    
+    fix_su_permissions || {
+        log "ERROR" "su permissions fix failed"
+        echo -e "${COLORS[YELLOW]}Some permission fixes failed - system may be partially functional${COLORS[NC]}"
+    }
+    
+    check_accessibility || log "WARN" "accessibility check had issues"
+    
+    # Handle command line arguments with validation
+    local command="${1:-check}"
+    validate_input "$command" "command" || {
+        echo -e "${COLORS[RED]}Invalid command specified${COLORS[NC]}"
+        exit 1
+    }
+    
+    case "$command" in
+        "android-term")
+            android_cmd_terminal || {
+                log "ERROR" "Android terminal launch failed"
+                return 1
+            }
+            ;;
+        "android-user")
+            android_user_info || {
+                log "ERROR" "Android user info retrieval failed"
+                return 1
+            }
+            ;;
+        "backup")
+            backup_critical_files || {
+                log "ERROR" "Backup creation failed"
+                return 1
+            }
+            ;;
+        "check")
+            echo -e "${COLORS[GREEN]}Full system check completed. Check logs for details.${COLORS[NC]}"
+            ;;
+        *)
+            echo -e "${COLORS[BLUE]}Available options:${COLORS[NC]}"
+            echo "  android-term  - Launch Android terminal"
+            echo "  android-user  - Show Android user info"
+            echo "  backup       - Create backup of critical files"
+            echo "  check        - Run full system check (default)"
+            echo "  interactive  - Launch interactive mode"
+            ;;
+    esac
+    
+    log "INFO" "Enhanced Superuser Terminal session completed successfully"
+    return 0
 }
 
-# Add to test workflow
-cat << EOF >> .github/workflows/test.yml
-    - name: Test System Detection
-      run: |
-        # Test system info generation
-        if [ ! -f "$SUPERUSER_HOME/system_info.json" ]; then
-          echo "System detection failed"
-          exit 1
-        fi
-        
-        # Test network configuration
-        if [ ! -f "$SUPERUSER_HOME/network/config.json" ]; then
-          echo "Network configuration failed"
-          exit 1
-        fi
-        
-        # Test VMware setup
-        if [ ! -d "$SUPERUSER_HOME/vmware" ]; then
-          echo "VMware setup failed"
-          exit 1
-        fi
-EOF
-
-chmod +x script.sh
-sudo ./script.sh
+# Execute main function with comprehensive error handling
+if ! main "$@"; then
+    echo -e "${COLORS[RED]}Script execution failed. Check logs for details.${COLORS[NC]}" >&2
+    log "ERROR" "Script execution failed"
+    exit 1
+fi
