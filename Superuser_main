@@ -3,8 +3,7 @@
 # Version: 1.0-prototype
 # This script provides enhanced functionality for managing superuser access on Android devices.
 
-set -e # Enable strict error handling
-# Note: set -u removed to avoid issues with uninitialized variables in conditional checks
+set -e
 
 # Security hardening - validate execution environment
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
@@ -48,6 +47,11 @@ fi
 
 # Enhanced root check with secure elevation
 secure_root_check() {
+    # Skip root check if already root or in test mode
+    if [ "$(id -u)" -eq 0 ] || [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || [[ "${DRY_RUN:-0}" == "1" ]]; then
+        return 0
+    fi
+    
     if [ "$(id -u)" -ne 0 ]; then
         echo "This script must be run as root." >&2
         echo "Attempting secure root elevation..."
@@ -74,6 +78,9 @@ secure_root_check() {
             exec "$su_binary" -c "$(printf '%q' "$0") $safe_args"
         else
             echo "Error: No valid su binary found" >&2
+            if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
+                echo "Hint: In Termux, try installing 'tsu' package" >&2
+            fi
             exit 1
         fi
     fi
@@ -138,9 +145,9 @@ check_dependencies() {
     log "INFO" "Starting dependency check"
     
     local missing_deps=()
-    local required_commands=("stat" "chmod" "chown" "mkdir" "grep" "awk" "date")
-    local optional_commands=("file" "timeout" "getenforce")
-    
+    local required_commands=("stat" "chmod" "chown" "mkdir" "grep" "awk" "date" "df" "uname" "cut" "head" "tail" "file" "timeout")
+    local optional_commands=("file" "timeout" "getenforce" "busybox" "adb" "magisk" "su" "id" "tsu")
+
     # Check required commands
     for cmd in "${required_commands[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -590,7 +597,67 @@ check_sudo_root_access() {
     fi
 }
 
-# Interactive menu
+# GUI mode detection and support
+if [[ "${GUI_MODE:-}" == "1" ]]; then
+    # Disable colored output for GUI consumption
+    declare -A COLORS=(
+        [RED]=''
+        [GREEN]=''
+        [CYAN]=''
+        [YELLOW]=''
+        [BLUE]=''
+        [PURPLE]=''
+        [NC]=''
+    )
+    
+    # Enhanced logging for GUI
+    log() {
+        local level="${1:-INFO}"
+        shift || true
+        local message="${*:-No message provided}"
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown-time")
+        
+        # GUI-friendly output format
+        echo "GUI_LOG:[$timestamp] [$level] $message"
+        
+        # Also log to file
+        if [[ -d "$LOG_DIR" ]]; then
+            echo "[$timestamp] [$level] $message" >> "$LOG_FILE" 2>/dev/null || true
+        fi
+    }
+fi
+
+# GUI command handler
+handle_gui_command() {
+    local command="$1"
+    
+    case "$command" in
+        "gui-status")
+            echo "GUI_STATUS:root=$(id -u)"
+            echo "GUI_STATUS:version=$VERSION"
+            echo "GUI_STATUS:timestamp=$(date)"
+            ;;
+        "gui-dependencies")
+            check_dependencies 2>&1 | sed 's/^/GUI_DEP:/'
+            ;;
+        "gui-system-info")
+            check_system_info 2>&1 | sed 's/^/GUI_SYSINFO:/'
+            ;;
+        *)
+            # Regular command handling
+            main "$command"
+            ;;
+    esac
+}
+
+# Check if being called from GUI
+if [[ "${1:-}" == gui-* ]]; then
+    export GUI_MODE=1
+    handle_gui_command "$1"
+    exit 0
+fi
+
+# Interactive menu (missing function - adding it)
 interactive_mode() {
     while true; do
         echo -e "\n${COLORS[PURPLE]}=== $BRAND_NAME v$VERSION ===${COLORS[NC]}"
@@ -637,53 +704,219 @@ interactive_mode() {
                 echo -e "${COLORS[RED]}Invalid option. Please try again.${COLORS[NC]}"
                 ;;
         esac
+        
+        if [[ $choice != 7 ]]; then
+            echo ""
+            read -p "Press Enter to continue..."
+        fi
     done
 }
 
-# Enhanced main function with comprehensive error handling
+# Fix Termux detection conflicts
+detect_termux() {
+    if [[ -d "/data/data/com.termux" ]]; then
+        export TERMUX_ENV=1
+        export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+        export TERMUX_HOME="/data/data/com.termux/files/home"
+        
+        log "INFO" "Termux environment detected"
+        
+        # Only auto-switch to tsu if explicitly requested
+        if [[ "${AUTO_TSU:-0}" == "1" && "$(id -u)" -ne 0 ]] && command -v tsu >/dev/null 2>&1; then
+            log "INFO" "Auto-switching to tsu for root access"
+            exec tsu -c "$0 $*"
+        fi
+    fi
+}
+
+# Add missing termux_integration function
+termux_integration() {
+    if [[ "${TERMUX_ENV}" == "1" ]]; then
+        log "INFO" "Enabling Termux integration features"
+        
+        # Termux API integration
+        if command -v termux-notification >/dev/null 2>&1; then
+            termux-notification --title "Superuser Terminal" --content "Root access session started" 2>/dev/null || true
+        fi
+        
+        # Storage access check
+        if [[ ! -d "/storage" && ! -d "$HOME/storage" ]]; then
+            log "WARN" "Storage access not configured. Run: termux-setup-storage"
+        fi
+        
+        # Set Termux-specific environment
+        export TERMUX_APP_PACKAGE="com.termux"
+        export SHELL="${PREFIX}/bin/bash"
+        
+        # Create Termux-specific directories
+        mkdir -p "$TERMUX_HOME/.config" "$TERMUX_HOME/.local/share" 2>/dev/null || true
+    fi
+}
+
+# Add missing termux_interactive_mode function
+termux_interactive_mode() {
+    while true; do
+        clear
+        echo -e "${COLORS[PURPLE]}╔══════════════════════════════════════════════════════╗${COLORS[NC]}"
+        echo -e "${COLORS[PURPLE]}║     🔐 ENHANCED SUPERUSER TERMINAL - TERMUX 🔐       ║${COLORS[NC]}"
+        echo -e "${COLORS[PURPLE]}║                   v$VERSION                           ║${COLORS[NC]}"
+        echo -e "${COLORS[PURPLE]}╚══════════════════════════════════════════════════════╝${COLORS[NC]}"
+        echo ""
+        echo -e "${COLORS[CYAN]}📱 ANDROID OPERATIONS:${COLORS[NC]}"
+        echo "1. 🔍 Full system check"
+        echo "2. 🔧 Fix su permissions"
+        echo "3. 📱 Android terminal"
+        echo "4. 📊 Device information"
+        echo "5. 💾 Create backup"
+        echo ""
+        echo -e "${COLORS[CYAN]}🛠️ TERMUX TOOLS:${COLORS[NC]}"
+        echo "6. 🖥️ Launch GUI (VNC)"
+        echo "7. 🔧 Termux tools menu"
+        echo "8. 📝 View logs"
+        echo "9. ⚙️ System configuration"
+        echo ""
+        echo "0. ❌ Exit"
+        echo ""
+        echo -n "Select option [0-9]: "
+        read -r choice
+        
+        case $choice in
+            1)
+                echo -e "${COLORS[GREEN]}Running full system check...${COLORS[NC]}"
+                check_system_info || true
+                check_device_compatibility || true
+                setup_root_superuser || true
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            2)
+                echo -e "${COLORS[GREEN]}Fixing permissions...${COLORS[NC]}"
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            3)
+                android_cmd_terminal || true
+                ;;
+            4)
+                android_user_info || true
+                if command -v termux-telephony-deviceinfo >/dev/null 2>&1; then
+                    echo -e "${COLORS[CYAN]}Termux Device Info:${COLORS[NC]}"
+                    termux-telephony-deviceinfo 2>/dev/null || echo "Device info not available"
+                fi
+                ;;
+            5)
+                backup_critical_files || true
+                ;;
+            6)
+                if command -v vncserver >/dev/null 2>&1; then
+                    echo -e "${COLORS[GREEN]}🖥️ Starting VNC server...${COLORS[NC]}"
+                    vncserver :1 -geometry 1280x720 2>/dev/null || echo "VNC start failed"
+                    echo "Connect VNC client to localhost:5901"
+                else
+                    echo -e "${COLORS[RED]}VNC server not installed${COLORS[NC]}"
+                    echo "Install with: pkg install tigervnc"
+                fi
+                ;;
+            7)
+                local tools_menu="$TERMUX_HOME/termux_tools_menu.sh"
+                if [[ -f "$tools_menu" ]]; then
+                    bash "$tools_menu"
+                else
+                    echo -e "${COLORS[RED]}Tools menu not found at $tools_menu${COLORS[NC]}"
+                fi
+                ;;
+            8)
+                echo -e "${COLORS[CYAN]}Recent log entries:${COLORS[NC]}"
+                tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs found"
+                ;;
+            9)
+                echo -e "${COLORS[CYAN]}System Configuration:${COLORS[NC]}"
+                echo "Termux prefix: ${PREFIX:-Not set}"
+                echo "Termux home: ${TERMUX_HOME:-Not set}"
+                echo "Storage access: $(test -d /storage && echo "✅ Available" || echo "❌ Run termux-setup-storage")"
+                echo "Root access: $(test "$(id -u)" -eq 0 && echo "✅ Active" || echo "❌ Not root")"
+                echo "TSU available: $(command -v tsu >/dev/null && echo "✅ Yes" || echo "❌ No")"
+                ;;
+            0)
+                echo -e "${COLORS[GREEN]}👋 Goodbye from Termux!${COLORS[NC]}"
+                if command -v termux-notification >/dev/null 2>&1; then
+                    termux-notification --title "Superuser Terminal" --content "Session ended" 2>/dev/null || true
+                fi
+                break
+                ;;
+            *)
+                echo -e "${COLORS[RED]}❌ Invalid option. Please try again.${COLORS[NC]}"
+                sleep 1
+                ;;
+        esac
+        
+        if [[ $choice != 0 ]]; then
+            echo ""
+            read -p "Press Enter to continue..."
+        fi
+    done
+}
+
+# Enhanced main function with better logic flow
 main() {
-    echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
-    log "INFO" "Starting Enhanced Superuser Terminal v$VERSION"
+    # Detect Termux environment first (but don't auto-escalate)
+    detect_termux
     
-    # Pre-flight checks
-    if ! check_dependencies; then
-        echo -e "${COLORS[RED]}Critical dependency check failed${COLORS[NC]}"
-        exit 1
+    echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
+    if [[ "${TERMUX_ENV}" == "1" ]]; then
+        echo -e "${COLORS[YELLOW]}🔧 Termux Environment Detected${COLORS[NC]}"
     fi
     
-    # Validate environment with enhanced checks
+    log "INFO" "Starting Enhanced Superuser Terminal v$VERSION"
+    
+    # Enable Termux integration if detected
+    if [[ "${TERMUX_ENV}" == "1" ]]; then
+        termux_integration || log "WARN" "Termux integration had issues"
+    fi
+    
+    # Pre-flight checks with better error handling
+    if ! check_dependencies; then
+        echo -e "${COLORS[RED]}Critical dependency check failed${COLORS[NC]}"
+        log "ERROR" "Dependency check failed - continuing with limited functionality"
+        # Don't exit, continue with limited functionality
+    fi
+    
+    # Environment validation with warnings instead of hard failures
     local validation_errors=()
     
     if [[ ! -w "/data" ]]; then
         validation_errors+=("/data directory is not writable")
     fi
     
-    if [[ ! -d "/system" ]]; then
+    if [[ ! -d "/system" ]] && [[ "${TERMUX_ENV}" != "1" ]]; then
         validation_errors+=("/system directory not found - may not be Android")
     fi
     
     # Check available disk space (require at least 10MB)
     local available_kb=$(df /data 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
-    if [[ "$available_kb" -lt 10240 ]]; then
-        validation_errors+=("Insufficient disk space (need 10MB, have ${available_kb}KB)")
+    if [[ "$available_kb" -lt 10240 ]] && [[ "$available_kb" != "0" ]]; then
+        validation_errors+=("Low disk space (have ${available_kb}KB)")
     fi
     
     if [[ ${#validation_errors[@]} -gt 0 ]]; then
-        echo -e "${COLORS[RED]}Environment validation failed:${COLORS[NC]}"
+        echo -e "${COLORS[YELLOW]}Environment warnings:${COLORS[NC]}"
         for error in "${validation_errors[@]}"; do
-            echo -e "${COLORS[RED]}  - $error${COLORS[NC]}"
-            log "ERROR" "$error"
+            echo -e "${COLORS[YELLOW]}  ⚠️ $error${COLORS[NC]}"
+            log "WARN" "$error"
         done
-        exit 1
     fi
     
     # Check if running interactively
     if [[ "$1" == "interactive" || "$1" == "-i" ]]; then
-        interactive_mode
+        if [[ "${TERMUX_ENV}" == "1" ]]; then
+            termux_interactive_mode
+        else
+            interactive_mode
+        fi
         return 0
     fi
     
-    # Run system checks first
+    # Run system checks with error tolerance
     check_system_info || log "WARN" "System info check had issues"
     check_device_compatibility || log "WARN" "Device compatibility check had issues"
     
@@ -692,41 +925,41 @@ main() {
     check_sudo_root_access || log "WARN" "sudo access check failed"
     setup_root_superuser || {
         log "ERROR" "root superuser setup failed"
-        echo -e "${COLORS[RED]}Failed to setup root superuser environment${COLORS[NC]}"
-        return 1
+        echo -e "${COLORS[YELLOW]}Warning: Failed to setup root superuser environment${COLORS[NC]}"
+        # Don't return 1, continue execution
     }
     
-    fix_su_permissions || {
+    if ! fix_su_permissions; then
         log "ERROR" "su permissions fix failed"
-        echo -e "${COLORS[YELLOW]}Some permission fixes failed - system may be partially functional${COLORS[NC]}"
-    }
+        echo -e "${COLORS[YELLOW]}Warning: Some permission fixes failed - system may be partially functional${COLORS[NC]}"
+    fi
     
     check_accessibility || log "WARN" "accessibility check had issues"
     
     # Handle command line arguments with validation
     local command="${1:-check}"
-    validate_input "$command" "command" || {
-        echo -e "${COLORS[RED]}Invalid command specified${COLORS[NC]}"
-        exit 1
-    }
+    if ! validate_input "$command" "command"; then
+        echo -e "${COLORS[RED]}Invalid command specified, using 'check'${COLORS[NC]}"
+        command="check"
+    fi
     
     case "$command" in
         "android-term")
             android_cmd_terminal || {
                 log "ERROR" "Android terminal launch failed"
-                return 1
+                echo -e "${COLORS[RED]}Failed to launch Android terminal${COLORS[NC]}"
             }
             ;;
         "android-user")
             android_user_info || {
                 log "ERROR" "Android user info retrieval failed"
-                return 1
+                echo -e "${COLORS[RED]}Failed to retrieve Android user info${COLORS[NC]}"
             }
             ;;
         "backup")
             backup_critical_files || {
                 log "ERROR" "Backup creation failed"
-                return 1
+                echo -e "${COLORS[RED]}Failed to create backup${COLORS[NC]}"
             }
             ;;
         "check")
@@ -742,13 +975,13 @@ main() {
             ;;
     esac
     
-    log "INFO" "Enhanced Superuser Terminal session completed successfully"
+    log "INFO" "Enhanced Superuser Terminal session completed"
     return 0
 }
 
 # Execute main function with comprehensive error handling
-if ! main "$@"; then
-    echo -e "${COLORS[RED]}Script execution failed. Check logs for details.${COLORS[NC]}" >&2
-    log "ERROR" "Script execution failed"
+main "$@" || {
+    echo -e "${COLORS[RED]}Script execution encountered errors. Check logs for details.${COLORS[NC]}" >&2
+    log "ERROR" "Script execution completed with errors"
     exit 1
-fi
+}
