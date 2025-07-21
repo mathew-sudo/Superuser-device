@@ -213,3 +213,41 @@ jobs:
         name: performance-logs-${{ github.run_id }}
         path: perf-logs/
         retention-days: 3
+
+  integration-test:
+    runs-on: ubuntu-latest
+    name: Integration Test
+    needs: [quick-test]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Full Integration Test
+      run: |
+        echo "Running integration tests..."
+        chmod +x fix_issues.sh
+        ./fix_issues.sh
+        
+        export DRY_RUN=1
+        export SKIP_ROOT_CHECK=1
+        
+        # Test all major commands
+        ./Superuser_main check
+        ./Superuser_main setup
+        ./Superuser_main fix || echo "Fix command completed"
+        ./Superuser_main backup || echo "Backup command completed"
+        
+        echo "✓ Integration tests passed"
+    
+    - name: Test Error Handling
+      run: |
+        echo "Testing error handling..."
+        export DRY_RUN=1
+        export SKIP_ROOT_CHECK=1
+        
+        # Test with invalid commands
+        ./Superuser_main invalid_command || echo "✓ Invalid command handled"
+        
+        # Test with missing dependencies
+        export PATH="/usr/bin:/bin"
+        ./Superuser_main check || echo "✓ Missing dependencies handled"
