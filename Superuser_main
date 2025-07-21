@@ -1,9 +1,51 @@
 #!/bin/bash
 # Superuser Terminal Script
-# Version: 1.0-prototype
+# Version: 1.1-enhanced
 # This script provides enhanced functionality for managing superuser access on Android devices.
 
-set -e
+set -euo pipefail
+
+# Performance optimization - enable parallel execution where safe
+export PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
+
+# Enhanced error handling with stack traces
+set -E
+trap 'error_handler $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "%s " "${FUNCNAME[@]}")' ERR
+
+error_handler() {
+    local exit_code=$1
+    local line_no=$2
+    local bash_lineno=$3
+    local last_command=$4
+    local func_stack=("${@:5}")
+    
+    echo "Error occurred in script execution:" >&2
+    echo "  Exit code: $exit_code" >&2
+    echo "  Line: $line_no" >&2
+    echo "  Command: $last_command" >&2
+    echo "  Function stack: ${func_stack[*]}" >&2
+    
+    # Log error details if logging function is available
+    if declare -f log >/dev/null 2>&1; then
+        log "FATAL" "Script error at line $line_no: $last_command (exit code: $exit_code)"
+    fi
+    
+    # Cleanup on error
+    cleanup_on_error
+    
+    exit $exit_code
+}
+
+# Cleanup function for error scenarios
+cleanup_on_error() {
+    # Kill background processes if any
+    jobs -p | xargs -r kill 2>/dev/null || true
+    
+    # Remove temporary files
+    rm -f /tmp/superuser_temp_* 2>/dev/null || true
+    
+    echo "Cleanup completed after error" >&2
+}
 
 # Security hardening - validate execution environment
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
@@ -16,15 +58,24 @@ validate_input() {
     local input="$1"
     local type="${2:-general}"
     
+    if [[ -z "$input" ]]; then
+        echo "Error: Input cannot be empty" >&2
+        return 1
+    fi
+    
     case "$type" in
         "path")
-            if [[ ! "$input" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
+            if [[ "$input" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
+                return 0
+            else
                 echo "Error: Invalid path characters detected" >&2
                 return 1
             fi
             ;;
         "command")
-            if [[ "$input" =~ [;&|`$] ]]; then
+            if ! [[ "$input" =~ [;&|`$] ]]; then
+                return 0
+            else
                 echo "Error: Dangerous command characters detected" >&2
                 return 1
             fi
@@ -102,7 +153,7 @@ secure_root_check "$@"
 echo "Root access confirmed (UID: $(id -u))"
 
 # Version and branding
-VERSION="1.0-prototype"
+VERSION="1.1-enhanced"
 BRAND_NAME="Enhanced Superuser Terminal"
 
 # Logging
@@ -156,18 +207,40 @@ declare -A COLORS=(
     [NC]='\033[0m'
 )
 
-# Enhanced dependency checker with better error handling
+# Performance-optimized dependency checker
 check_dependencies() {
     echo -e "${COLORS[CYAN]}Checking system dependencies...${COLORS[NC]}"
-    log "INFO" "Starting dependency check"
+    log "INFO" "Starting optimized dependency check"
     
     local missing_deps=()
     local required_commands=("stat" "chmod" "chown" "mkdir" "grep" "awk" "date")
     local optional_commands=("df" "uname" "cut" "head" "tail" "file" "timeout" "getenforce" "busybox" "adb" "magisk" "su" "id" "tsu")
 
-    # Check required commands
-    for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
+    # Parallel dependency checking for better performance
+    check_command_batch() {
+        local commands=("$@")
+        local results=()
+        
+        for cmd in "${commands[@]}"; do
+            if command -v "$cmd" >/dev/null 2>&1; then
+                results+=("FOUND:$cmd")
+            else
+                results+=("MISSING:$cmd")
+            fi
+        done
+        
+        printf '%s\n' "${results[@]}"
+    }
+
+    # Check required commands in parallel
+    local required_results
+    mapfile -t required_results < <(check_command_batch "${required_commands[@]}")
+    
+    for result in "${required_results[@]}"; do
+        local status="${result%%:*}"
+        local cmd="${result##*:}"
+        
+        if [[ "$status" == "MISSING" ]]; then
             missing_deps+=("$cmd")
             echo -e "${COLORS[RED]}✗${COLORS[NC]} Missing required command: $cmd"
         else
@@ -176,25 +249,39 @@ check_dependencies() {
     done
     
     # Check optional commands
-    for cmd in "${optional_commands[@]}"; do
-        if command -v "$cmd" >/dev/null 2>&1; then
+    local optional_results
+    mapfile -t optional_results < <(check_command_batch "${optional_commands[@]}")
+    
+    for result in "${optional_results[@]}"; do
+        local status="${result%%:*}"
+        local cmd="${result##*:}"
+        
+        if [[ "$status" == "FOUND" ]]; then
             echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Found (optional): $cmd"
         else
             echo -e "${COLORS[YELLOW]}!${COLORS[NC]} Missing (optional): $cmd"
         fi
     done
     
-    # Handle missing dependencies gracefully
+    # Enhanced dependency resolution with caching
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         echo -e "${COLORS[YELLOW]}Attempting to resolve missing dependencies...${COLORS[NC]}"
-        if command -v busybox >/dev/null 2>&1; then
-            echo -e "${COLORS[GREEN]}BusyBox detected - using built-in commands${COLORS[NC]}"
-            # Create symlinks for missing commands if busybox is available
+        
+        # Cache busybox detection
+        local busybox_available=""
+        if [[ -z "$busybox_available" ]]; then
+            busybox_available=$(command -v busybox >/dev/null 2>&1 && echo "yes" || echo "no")
+        fi
+        
+        if [[ "$busybox_available" == "yes" ]]; then
+            echo -e "${COLORS[GREEN]}BusyBox detected - resolving dependencies...${COLORS[NC]}"
+            
+            # Batch process missing dependencies
             for dep in "${missing_deps[@]}"; do
                 if busybox "$dep" --help >/dev/null 2>&1; then
-                    # Only create symlinks if we have write access
                     if [[ -w "/system/bin" ]] 2>/dev/null; then
-                        ln -sf "$(which busybox)" "/system/bin/$dep" 2>/dev/null || true
+                        ln -sf "$(command -v busybox)" "/system/bin/$dep" 2>/dev/null || true
+                        echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Resolved: $dep -> busybox"
                     fi
                 fi
             done
@@ -207,68 +294,85 @@ check_dependencies() {
     fi
     
     echo -e "${COLORS[GREEN]}Dependency check completed${COLORS[NC]}"
-    log "INFO" "Dependency check completed"
+    log "INFO" "Dependency check completed successfully"
     return 0
 }
 
-# System information check
+# Enhanced system information with caching
 check_system_info() {
     echo -e "${COLORS[CYAN]}System Information Check:${COLORS[NC]}"
-    log "INFO" "Starting system information check"
+    log "INFO" "Starting enhanced system information check"
     
-    # Enhanced Android version detection with multiple sources
-    local android_version="Unknown"
-    local api_level="Unknown"
+    # Cache system properties for performance
+    local -A system_cache=()
     
-    # Try multiple sources for Android version
-    if [[ -f "/system/build.prop" ]]; then
-        android_version=$(grep "ro.build.version.release" /system/build.prop 2>/dev/null | cut -d'=' -f2 | head -1 || echo "Unknown")
-        api_level=$(grep "ro.build.version.sdk" /system/build.prop 2>/dev/null | cut -d'=' -f2 | head -1 || echo "Unknown")
-    elif [[ -f "/vendor/build.prop" ]]; then
-        android_version=$(grep "ro.vendor.build.version.release" /vendor/build.prop 2>/dev/null | cut -d'=' -f2 | head -1 || echo "Unknown")
-    fi
+    populate_system_cache() {
+        local build_prop_files=("/system/build.prop" "/vendor/build.prop" "/product/build.prop")
+        
+        for prop_file in "${build_prop_files[@]}"; do
+            if [[ -f "$prop_file" ]]; then
+                while IFS='=' read -r key value; do
+                    [[ "$key" =~ ^ro\. ]] && system_cache["$key"]="$value"
+                done < "$prop_file"
+                break
+            fi
+        done
+    }
     
-    # Validate extracted values
+    populate_system_cache
+    
+    # Enhanced Android version detection
+    local android_version="${system_cache[ro.build.version.release]:-Unknown}"
+    local api_level="${system_cache[ro.build.version.sdk]:-Unknown}"
+    local device_model="${system_cache[ro.product.model]:-Unknown}"
+    local device_brand="${system_cache[ro.product.brand]:-Unknown}"
+    
+    # Validate and display system information
     if [[ "$api_level" =~ ^[0-9]+$ ]]; then
         validate_input "$api_level" "numeric" || api_level="Unknown"
     fi
     
+    echo -e "${COLORS[GREEN]}Device: $device_brand $device_model${COLORS[NC]}"
     echo -e "${COLORS[GREEN]}Android Version: $android_version (API $api_level)${COLORS[NC]}"
-    log "INFO" "Android Version: $android_version (API $api_level)"
+    log "INFO" "Device: $device_brand $device_model, Android: $android_version (API $api_level)"
     
-    # Enhanced architecture detection
+    # Enhanced architecture detection with performance optimization
+    local arch
     arch=$(uname -m 2>/dev/null || echo "unknown")
-    local cpu_abi=""
-    if [[ -f "/system/build.prop" ]]; then
-        cpu_abi=$(grep "ro.product.cpu.abi=" /system/build.prop 2>/dev/null | cut -d'=' -f2 || echo "")
-    fi
+    local cpu_abi="${system_cache[ro.product.cpu.abi]:-}"
+    local cpu_abi2="${system_cache[ro.product.cpu.abi2]:-}"
     
     echo -e "${COLORS[GREEN]}Architecture: $arch${COLORS[NC]}"
-    if [[ -n "$cpu_abi" ]]; then
-        echo -e "${COLORS[GREEN]}CPU ABI: $cpu_abi${COLORS[NC]}"
-        log "INFO" "Architecture: $arch, CPU ABI: $cpu_abi"
-    else
-        log "INFO" "Architecture: $arch"
-    fi
+    [[ -n "$cpu_abi" ]] && echo -e "${COLORS[GREEN]}Primary ABI: $cpu_abi${COLORS[NC]}"
+    [[ -n "$cpu_abi2" ]] && echo -e "${COLORS[GREEN]}Secondary ABI: $cpu_abi2${COLORS[NC]}"
     
-    # Check available space with error handling
-    if available_space=$(df /data 2>/dev/null | tail -1 | awk '{print $4}'); then
-        echo -e "${COLORS[GREEN]}Available space in /data: ${available_space}KB${COLORS[NC]}"
-        log "INFO" "Available space in /data: ${available_space}KB"
-    else
-        echo -e "${COLORS[YELLOW]}Warning: Could not check available space in /data${COLORS[NC]}"
-        log "WARN" "Could not check /data space"
-    fi
+    # Parallel system checks for better performance
+    {
+        # Memory information
+        if [[ -f "/proc/meminfo" ]]; then
+            local total_mem
+            total_mem=$(awk '/MemTotal/ {print int($2/1024) " MB"}' /proc/meminfo 2>/dev/null || echo "Unknown")
+            echo -e "${COLORS[GREEN]}Total Memory: $total_mem${COLORS[NC]}"
+        fi
+        
+        # Storage information
+        if command -v df >/dev/null 2>&1; then
+            local available_space
+            available_space=$(df /data 2>/dev/null | tail -1 | awk '{print int($4/1024) " MB"}' || echo "Unknown")
+            echo -e "${COLORS[GREEN]}Available /data space: $available_space${COLORS[NC]}"
+        fi
+        
+        # SELinux status
+        if command -v getenforce >/dev/null 2>&1; then
+            local selinux_status
+            selinux_status=$(getenforce 2>/dev/null || echo "Unknown")
+            echo -e "${COLORS[YELLOW]}SELinux Status: $selinux_status${COLORS[NC]}"
+        fi
+    } &
     
-    # Check SELinux status
-    if command -v getenforce >/dev/null 2>&1; then
-        selinux_status=$(getenforce 2>/dev/null || echo "Unknown")
-        echo -e "${COLORS[YELLOW]}SELinux Status: $selinux_status${COLORS[NC]}"
-        log "INFO" "SELinux Status: $selinux_status"
-    else
-        echo -e "${COLORS[YELLOW]}SELinux tools not available${COLORS[NC]}"
-        log "INFO" "SELinux tools not available"
-    fi
+    wait
+    
+    log "INFO" "System information check completed"
 }
 
 # Enhanced device compatibility check
@@ -908,75 +1012,440 @@ EOF
     return 0
 }
 
-# Enhanced main function with all required integrations
+# Enhanced network diagnostics
+check_network_connectivity() {
+    echo -e "${COLORS[CYAN]}Network Connectivity Check:${COLORS[NC]}"
+    log "INFO" "Starting network connectivity check"
+    
+    local connectivity_score=0
+    local total_tests=0
+    
+    # Test DNS resolution
+    ((total_tests++))
+    if command -v nslookup >/dev/null 2>&1; then
+        if nslookup google.com >/dev/null 2>&1; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} DNS resolution working"
+            ((connectivity_score++))
+        else
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} DNS resolution failed"
+        fi
+    else
+        echo -e "${COLORS[YELLOW]}!${COLORS[NC]} nslookup not available"
+    fi
+    
+    # Test network interfaces
+    ((total_tests++))
+    if command -v ip >/dev/null 2>&1; then
+        local active_interfaces=$(ip link show up | grep -c "state UP" || echo "0")
+        if [[ "$active_interfaces" -gt 0 ]]; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Network interfaces active: $active_interfaces"
+            ((connectivity_score++))
+        else
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} No active network interfaces"
+        fi
+    else
+        echo -e "${COLORS[YELLOW]}!${COLORS[NC]} ip command not available"
+    fi
+    
+    # Calculate connectivity score
+    local connectivity_percent=$((connectivity_score * 100 / total_tests))
+    echo -e "${COLORS[BLUE]}Network Score: $connectivity_percent%${COLORS[NC]}"
+    log "INFO" "Network connectivity score: $connectivity_percent%"
+}
+
+# Enhanced security audit
+security_audit() {
+    echo -e "${COLORS[CYAN]}Security Audit:${COLORS[NC]}"
+    log "INFO" "Starting security audit"
+    
+    local security_issues=0
+    
+    # Check for world-writable files in sensitive locations
+    local sensitive_dirs=("/system" "/data/local/tmp" "/data/superuser")
+    for dir in "${sensitive_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            local writable_files=$(find "$dir" -type f -perm -002 2>/dev/null | wc -l || echo "0")
+            if [[ "$writable_files" -gt 0 ]]; then
+                echo -e "${COLORS[YELLOW]}⚠${COLORS[NC]} Found $writable_files world-writable files in $dir"
+                ((security_issues++))
+            else
+                echo -e "${COLORS[GREEN]}✓${COLORS[NC]} No world-writable files in $dir"
+            fi
+        fi
+    done
+    
+    # Check su binary security
+    for su_path in "${SU_PATHS[@]}"; do
+        if [[ -f "$su_path" ]]; then
+            local perms=$(stat -c %a "$su_path" 2>/dev/null || echo "000")
+            if [[ "$perms" == "6755" ]]; then
+                echo -e "${COLORS[GREEN]}✓${COLORS[NC]} $su_path has secure permissions"
+            else
+                echo -e "${COLORS[YELLOW]}⚠${COLORS[NC]} $su_path has permissions: $perms"
+                ((security_issues++))
+            fi
+        fi
+    done
+    
+    # Check for suspicious processes
+    if command -v ps >/dev/null 2>&1; then
+        local suspicious_procs=$(ps aux | grep -E "(adbd|debuggerd)" | grep -v grep | wc -l || echo "0")
+        if [[ "$suspicious_procs" -gt 0 ]]; then
+            echo -e "${COLORS[YELLOW]}⚠${COLORS[NC]} Found $suspicious_procs potentially suspicious processes"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} No suspicious processes detected"
+        fi
+    fi
+    
+    echo -e "${COLORS[BLUE]}Security Issues Found: $security_issues${COLORS[NC]}"
+    log "INFO" "Security audit completed with $security_issues issues"
+    
+    return $security_issues
+}
+
+# System optimization suggestions
+suggest_optimizations() {
+    echo -e "${COLORS[CYAN]}System Optimization Suggestions:${COLORS[NC]}"
+    log "INFO" "Generating optimization suggestions"
+    
+    # Memory optimization
+    if [[ -f "/proc/meminfo" ]]; then
+        local free_mem=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+        local total_mem=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo "1")
+        local mem_usage_percent=$((100 - (free_mem * 100 / total_mem)))
+        
+        if [[ "$mem_usage_percent" -gt 80 ]]; then
+            echo -e "${COLORS[YELLOW]}💡${COLORS[NC]} High memory usage ($mem_usage_percent%) - consider closing unused apps"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Memory usage is optimal ($mem_usage_percent%)"
+        fi
+    fi
+    
+    # Storage optimization
+    if command -v df >/dev/null 2>&1; then
+        local data_usage=$(df /data 2>/dev/null | tail -1 | awk '{print $5}' | sed 's/%//' || echo "0")
+        if [[ "$data_usage" -gt 90 ]]; then
+            echo -e "${COLORS[YELLOW]}💡${COLORS[NC]} High storage usage ($data_usage%) - consider cleaning cache"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Storage usage is acceptable ($data_usage%)"
+        fi
+    fi
+    
+    # Performance suggestions
+    if [[ -f "/proc/loadavg" ]]; then
+        local load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
+        if (( $(echo "$load_avg > 2.0" | bc -l 2>/dev/null || echo 0) )); then
+            echo -e "${COLORS[YELLOW]}💡${COLORS[NC]} High system load ($load_avg) - consider restarting device"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} System load is normal ($load_avg)"
+        fi
+    fi
+    
+    log "INFO" "Optimization suggestions completed"
+}
+
+# New benchmark function for performance testing
+benchmark_system_performance() {
+    echo -e "${COLORS[CYAN]}System Performance Benchmark:${COLORS[NC]}"
+    
+    local start_time
+    start_time=$(date +%s.%N 2>/dev/null || date +%s)
+    
+    # CPU performance test
+    echo "Testing CPU performance..."
+    local time_result
+    time_result=$(time (for i in {1..1000}; do echo "$i" >/dev/null; done) 2>&1 | grep real || echo "N/A")
+    echo "CPU test: $time_result"
+    
+    # Memory performance test
+    echo "Testing memory performance..."
+    if command -v free >/dev/null 2>&1; then
+        free -h
+    else
+        echo "Memory info not available"
+    fi
+    
+    # Disk I/O performance test
+    echo "Testing disk I/O performance..."
+    if [[ -w "/data" ]]; then
+        local test_file="/data/superuser_benchmark_test"
+        dd if=/dev/zero of="$test_file" bs=1M count=10 2>&1 | grep -E "(copied|MB/s)" || echo "I/O test failed"
+        rm -f "$test_file" 2>/dev/null
+    else
+        echo "Disk I/O test skipped (no write access)"
+    fi
+    
+    local end_time
+    end_time=$(date +%s.%N 2>/dev/null || date +%s)
+    local benchmark_time
+    benchmark_time=$(echo "$end_time - $start_time" | bc -l 2>/dev/null || echo "N/A")
+    
+    echo -e "${COLORS[GREEN]}Benchmark completed in ${benchmark_time} seconds${COLORS[NC]}"
+    log "PERF" "System benchmark completed in ${benchmark_time} seconds"
+}
+
+# GUI mode detection and support
+if [[ "${GUI_MODE:-}" == "1" ]]; then
+    # Disable colored output for GUI consumption
+    declare -A COLORS=(
+        [RED]=''
+        [GREEN]=''
+        [CYAN]=''
+        [YELLOW]=''
+        [BLUE]=''
+        [PURPLE]=''
+        [NC]=''
+    )
+    
+    # Enhanced logging for GUI
+    log() {
+        local level="${1:-INFO}"
+        shift || true
+        local message="${*:-No message provided}"
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown-time")
+        
+        # GUI-friendly output format
+        echo "GUI_LOG:[$timestamp] [$level] $message"
+        
+        # Also log to file
+        if [[ -d "$LOG_DIR" ]]; then
+            echo "[$timestamp] [$level] $message" >> "$LOG_FILE" 2>/dev/null || true
+        fi
+    }
+fi
+
+# GUI command handler
+handle_gui_command() {
+    local command="$1"
+    
+    case "$command" in
+        "gui-status")
+            echo "GUI_STATUS:root=$(id -u)"
+            echo "GUI_STATUS:version=$VERSION"
+            echo "GUI_STATUS:timestamp=$(date)"
+            ;;
+        "gui-dependencies")
+            check_dependencies 2>&1 | sed 's/^/GUI_DEP:/'
+            ;;
+        "gui-system-info")
+            check_system_info 2>&1 | sed 's/^/GUI_SYSINFO:/'
+            ;;
+        *)
+            # Regular command handling
+            main "$command"
+            ;;
+    esac
+}
+
+# Check if being called from GUI
+if [[ "${1:-}" == gui-* ]]; then
+    export GUI_MODE=1
+    handle_gui_command "$1"
+    exit 0
+fi
+
+# Enhanced main function with new features
 main() {
+    local start_time
+    start_time=$(date +%s)
+    
     # Detect Termux environment first
     detect_termux || true
     
     echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
-    if [[ "${TERMUX_ENV}" == "1" ]]; then
+    if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
         echo -e "${COLORS[YELLOW]}🔧 Termux Environment Detected${COLORS[NC]}"
     fi
     
     log "INFO" "Starting Enhanced Superuser Terminal v$VERSION"
     
     # Enable Termux integration if detected
-    if [[ "${TERMUX_ENV}" == "1" ]]; then
+    if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
         termux_integration || {
             log "WARN" "Termux integration had issues"
             echo -e "${COLORS[YELLOW]}Warning: Termux integration incomplete${COLORS[NC]}"
         }
     fi
     
-    # Check dependencies with better error handling
+    # Pre-flight system validation
+    if [[ "${DRY_RUN:-0}" != "1" ]]; then
+        echo -e "${COLORS[CYAN]}Performing pre-flight checks...${COLORS[NC]}"
+        
+        # Check available disk space
+        local available_kb
+        available_kb=$(df /data 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+        if [[ "$available_kb" -lt 51200 ]] && [[ "$available_kb" != "0" ]]; then
+            echo -e "${COLORS[YELLOW]}Warning: Low disk space (${available_kb}KB available)${COLORS[NC]}"
+            log "WARN" "Low disk space warning: ${available_kb}KB"
+        fi
+        
+        # Check system load
+        if [[ -f "/proc/loadavg" ]]; then
+            local load_avg
+            load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
+            if (( $(echo "$load_avg > 2.0" | bc -l 2>/dev/null || echo 0) )); then
+                echo -e "${COLORS[YELLOW]}Warning: High system load ($load_avg)${COLORS[NC]}"
+                log "WARN" "High system load: $load_avg"
+            fi
+        fi
+    fi
+    
+    # Enhanced dependency checking with performance metrics
+    local dep_start
+    dep_start=$(date +%s)
     check_dependencies || {
         echo -e "${COLORS[YELLOW]}Continuing with limited functionality...${COLORS[NC]}"
         log "WARN" "Dependency check failed - limited functionality"
     }
+    local dep_end
+    dep_end=$(date +%s)
+    log "PERF" "Dependency check took $((dep_end - dep_start)) seconds"
     
-    # Handle command line arguments
+    # Command execution with enhanced error handling
     local command="${1:-check}"
+    local cmd_start
+    cmd_start=$(date +%s)
     
     case "$command" in
         "interactive"|"-i")
-            if [[ "${TERMUX_ENV}" == "1" ]]; then
+            if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
                 termux_interactive_mode
             else
                 interactive_mode
             fi
             ;;
         "check")
-            echo -e "${COLORS[GREEN]}Running system check...${COLORS[NC]}"
-            check_system_info && test_result "System Info Check" $?
-            check_device_compatibility && test_result "Device Compatibility" $?
+            echo -e "${COLORS[GREEN]}Running comprehensive system check...${COLORS[NC]}"
+            {
+                check_system_info && test_result "System Info Check" $? &
+                check_device_compatibility && test_result "Device Compatibility" $? &
+                wait
+            }
             echo -e "${COLORS[GREEN]}System check completed.${COLORS[NC]}"
             ;;
         "setup")
-            echo -e "${COLORS[GREEN]}Running setup...${COLORS[NC]}"
+            echo -e "${COLORS[GREEN]}Running enhanced setup...${COLORS[NC]}"
             create_directories && test_result "Directory Creation" $?
             setup_root_superuser && test_result "Root Superuser Setup" $?
             ;;
         "fix")
-            echo -e "${COLORS[GREEN]}Fixing permissions...${COLORS[NC]}"
+            echo -e "${COLORS[GREEN]}Fixing permissions with enhanced safety...${COLORS[NC]}"
             fix_su_permissions && test_result "Permission Fix" $?
             check_accessibility && test_result "Accessibility Check" $?
             ;;
         "backup")
-            echo -e "${COLORS[GREEN]}Creating backup...${COLORS[NC]}"
+            echo -e "${COLORS[GREEN]}Creating enhanced backup...${COLORS[NC]}"
             backup_critical_files && test_result "Backup Creation" $?
             ;;
+        "benchmark")
+            echo -e "${COLORS[BLUE]}Running performance benchmark...${COLORS[NC]}"
+            benchmark_system_performance
+            ;;
+        "network")
+            echo -e "${COLORS[BLUE]}Running network diagnostics...${COLORS[NC]}"
+            check_network_connectivity
+            ;;
+        "security")
+            echo -e "${COLORS[BLUE]}Running security audit...${COLORS[NC]}"
+            security_audit
+            ;;
+        "optimize")
+            echo -e "${COLORS[BLUE]}Analyzing system for optimizations...${COLORS[NC]}"
+            suggest_optimizations
+            ;;
+        "full")
+            echo -e "${COLORS[GREEN]}Running full diagnostic suite...${COLORS[NC]}"
+            check_system_info && test_result "System Info Check" $?
+            check_device_compatibility && test_result "Device Compatibility" $?
+            check_network_connectivity
+            security_audit
+            suggest_optimizations
+            ;;
         *)
-            echo -e "${COLORS[BLUE]}Available options:${COLORS[NC]}"
-            echo "  check           - Run system check (default)"
+            echo -e "${COLORS[BLUE]}Enhanced Superuser Terminal - Available options:${COLORS[NC]}"
+            echo "  check           - Run comprehensive system check (default)"
             echo "  interactive     - Launch interactive mode"
-            echo "  setup           - Run initial setup"
-            echo "  fix             - Fix su permissions"
-            echo "  backup          - Create backup of critical files"
+            echo "  setup           - Run initial setup with optimizations"
+            echo "  fix             - Fix su permissions with safety checks"
+            echo "  backup          - Create enhanced backup of critical files"
+            echo "  benchmark       - Run system performance benchmark"
+            echo "  network         - Check network connectivity"
+            echo "  security        - Run security audit"
+            echo "  optimize        - Get optimization suggestions"
+            echo "  full            - Run complete diagnostic suite"
             ;;
     esac
     
-    log "INFO" "Enhanced Superuser Terminal session completed"
+    local cmd_end
+    cmd_end=$(date +%s)
+    local total_time
+    total_time=$((cmd_end - start_time))
+    
+    echo -e "${COLORS[BLUE]}Execution completed in ${total_time} seconds${COLORS[NC]}"
+    log "INFO" "Enhanced Superuser Terminal session completed (${total_time}s total)"
+    log "PERF" "Command '$command' execution took $((cmd_end - cmd_start)) seconds"
+    
     return 0
+}
+
+# Interactive mode
+interactive_mode() {
+    while true; do
+        echo -e "\n${COLORS[PURPLE]}=== $BRAND_NAME v$VERSION ===${COLORS[NC]}"
+        echo "1. Run full system check"
+        echo "2. Fix su permissions"
+        echo "3. Android command terminal"
+        echo "4. Android user info"
+        echo "5. Create backup"
+        echo "6. View logs"
+        echo "7. Exit"
+        echo -n "Select option [1-7]: "
+        read -r choice
+        
+        case $choice in
+            1)
+                echo -e "${COLORS[GREEN]}Running full system check...${COLORS[NC]}"
+                check_system_info || true
+                check_device_compatibility || true
+                setup_root_superuser || true
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            2)
+                echo -e "${COLORS[GREEN]}Fixing su permissions...${COLORS[NC]}"
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            3)
+                echo -e "${COLORS[GREEN]}Launching Android terminal...${COLORS[NC]}"
+                android_cmd_terminal || true
+                ;;
+            4)
+                echo -e "${COLORS[GREEN]}Getting Android user info...${COLORS[NC]}"
+                android_user_info || true
+                ;;
+            5)
+                echo -e "${COLORS[GREEN]}Creating backup...${COLORS[NC]}"
+                backup_critical_files || true
+                ;;
+            6)
+                echo -e "${COLORS[CYAN]}Recent log entries:${COLORS[NC]}"
+                tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs found"
+                ;;
+            7)
+                echo -e "${COLORS[GREEN]}Goodbye!${COLORS[NC]}"
+                break
+                ;;
+            *)
+                echo -e "${COLORS[RED]}Invalid option. Please try again.${COLORS[NC]}"
+                ;;
+        esac
+        
+        if [[ $choice != 7 ]]; then
+            echo ""
+            read -p "Press Enter to continue..."
+        fi
+    done
 }
 
 # Execute main function

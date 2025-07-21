@@ -108,3 +108,60 @@ else
     echo "⚠️  Some tests failed. Review the output above for details."
     exit 1
 fi
+    "$(dirname "$0")/Superuser_main" "$@"
+}
+# Check dependencies
+check_dependencies() {
+    echo "🔍 Checking dependencies..."
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "❌ Python 3 is required but not installed."
+        echo "Install with: sudo apt-get install python3 python3-tk"
+        exit 1
+    fi
+    # Check for tkinter
+    if ! python3 -c "import tkinter" 2>/dev/null; then
+        echo "❌ tkinter is required but not installed."
+        echo "Install with: sudo apt-get install python3-tk"
+        exit 1
+    fi
+    echo "✅ All dependencies satisfied"
+}
+# Main execution
+main() {
+    check_dependencies
+    setup_environment "$@"
+    echo "🚀 Starting Superuser GUI..."
+    "$(dirname "$0")/Superuser_main" "$@"
+}
+# Run main function
+main "$@"
+EOF
+    echo "✓ Created .gitignore"
+fi [[ ! -f ".gitignore" ]] && echo "No .gitignore file found, created a new one."
+echo "Creating standard directories..."
+mkdir -p logs backups .github/workflows
+echo "✅ Fixes applied successfully!"
+echo ""
+echo "🎉 All critical issues fixed successfully!"
+echo "Please run the test_fixes.sh script to verify all issues are resolved."
+fi [ -f ".gitignore" ]] && echo "No .gitignore file found, created a new one."
+echo "Creating standard directories..."
+mkdir -p logs backups .github/workflows
+echo "✅ Fixes applied successfully!"
+echo ""
+echo "🎉 All critical issues fixed successfully!"
+echo "Please run the test_fixes.sh script to verify all issues are resolved."
+echo "🚀 Next steps:"
+echo "  1. Test the script: ./Superuser_main check"
+echo "  2. Run interactive mode: ./Superuser_main interactive"
+echo "  3. Check CI pipeline: .github/workflows/ci.yml"
+echo "  4. Review logs in: logs/"
+echo "  5. Backup important data: backups/"
+echo ""
+echo "Thank you for using Superuser-device!"
+echo "For any issues, please open a ticket on GitHub."
+echo "Have a great day! 😊"
+exit 0
+done
+# end of script
+end of script
