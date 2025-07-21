@@ -1,5 +1,6 @@
 #!/bin/bash
 # Fix Critical Issues Script - Resolve all blocking problems
+# This script ensures all critical issues in the Superuser device management scripts are fixed.
 
 set -e
 
@@ -38,6 +39,7 @@ done
 echo "Checking for required functions in Superuser_main..."
 required_functions=(
     "main"
+    "log"
     "interactive_mode"
     "termux_interactive_mode"
     "termux_integration"
