@@ -1,4 +1,4 @@
-# Enhanced Superuser Terminal
+# Enhanced Superuser Terminal Android App
 
 ![CI Status](https://github.com/mathew-sudo/Superuser-device/workflows/Superuser%20CI%20Tests/badge.svg)
 ![Security Audit](https://img.shields.io/badge/security-audited-green)

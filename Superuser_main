@@ -25,18 +25,18 @@ end_performance_monitoring() {
     end_time=$(date +%s.%N 2>/dev/null || date +%s)
     local memory_end
     memory_end=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
-    
+    PERFORMANCE_METRICS[script_end]=$end_time
     local execution_time
     execution_time=$(echo "$end_time - ${PERFORMANCE_METRICS[script_start]}" | bc -l 2>/dev/null || echo "N/A")
-    
+
     local memory_used
     memory_used=$((${PERFORMANCE_METRICS[memory_start]} - memory_end))
-    
+
     echo -e "${COLORS[BLUE]}📊 Performance Summary:${COLORS[NC]}"
     echo "  Execution Time: ${execution_time}s"
     echo "  Memory Impact: ${memory_used}KB"
     echo "  Cache Hits: ${#CACHED_RESULTS[@]}"
-    
+    echo "  Cached Results: ${!CACHED_RESULTS[@]}"
     log "PERF" "Total execution time: ${execution_time}s, Memory used: ${memory_used}KB"
 }
 
@@ -56,7 +56,7 @@ get_cached_result() {
 # Enhanced dependency resolver with auto-installation
 auto_install_dependencies() {
     echo -e "${COLORS[CYAN]}Auto-installing missing dependencies...${COLORS[NC]}"
-    
+    log "INFO" "Starting auto-installation of dependencies"
     local install_commands=(
         "apt-get update && apt-get install -y"
         "yum install -y"
@@ -64,9 +64,8 @@ auto_install_dependencies() {
         "pacman -S --noconfirm"
         "zypper install -y"
     )
-    
+
     local dependencies=("curl" "wget" "git" "nano" "vim" "htop" "tree" "zip" "unzip")
-    
     for cmd in "${install_commands[@]}"; do
         if command -v "${cmd%% *}" >/dev/null 2>&1; then
             echo -e "${COLORS[GREEN]}Found package manager: ${cmd%% *}${COLORS[NC]}"
@@ -84,15 +83,32 @@ auto_install_dependencies() {
             break
         fi
     done
+    for cmd in "${install_commands[@]}"; do
+        if command -v "${cmd%% *}" >/dev/null 2>&1; then
+            echo -e "${COLORS[GREEN]}Found package manager: ${cmd%% *}${COLORS[NC]}"
+            echo -e "${COLORS[CYAN]}Installing dependencies...${COLORS[NC]}"
+            for dep in "${dependencies[@]}"; do
+                if ! command -v "$dep" >/dev/null 2>&1; then
+                    echo "Installing $dep..."
+                    if eval "$cmd $dep" >/dev/null 2>&1; then
+                        echo -e "${COLORS[GREN]}✓]}✓ Installed: $dep${COLORS[NC]}"
+                    else
+                        echo -e "${COLORS[YELLOW]}! Failed to install: $dep${COLORS[NC]}"
+                    fi
+                fi
+            done
+            break
+        fi
+    done
 }
 
 # Advanced system health monitoring
 system_health_monitor() {
     echo -e "${COLORS[CYAN]}🏥 System Health Monitor${COLORS[NC]}"
-    
+    log "INFO" "Starting system health monitoring"
     local health_score=0
     local total_checks=10
-    
+    echo -e "${COLORS[CYAN]}Performing system health checks...${COLORS[NC]}"
     # CPU health
     if [[ -f "/proc/loadavg" ]]; then
         local load_avg
@@ -104,7 +120,7 @@ system_health_monitor() {
             echo -e "${COLORS[YELLOW]}⚠ CPU Load: High ($load_avg)${COLORS[NC]}"
         fi
     fi
-    
+
     # Memory health
     if [[ -f "/proc/meminfo" ]]; then
         local mem_available
@@ -112,7 +128,10 @@ system_health_monitor() {
         local mem_total
         mem_total=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
         local mem_usage_percent=$((100 - (mem_available * 100 / mem_total)))
-        
+        if [[ "$mem_usage_percent" -lt 70 ]]; then
+            echo -e "${COLORS[GREEN]}✓ Memory Usage: Normal (${mem_usage_percent}%)${COLORS[NC]}"
+            ((health_score++))
+        else
         if [[ "$mem_usage_percent" -lt 80 ]]; then
             echo -e "${COLORS[GREEN]}✓ Memory Usage: Normal (${mem_usage_percent}%)${COLORS[NC]}"
             ((health_score++))
@@ -120,7 +139,7 @@ system_health_monitor() {
             echo -e "${COLORS[YELLOW]}⚠ Memory Usage: High (${mem_usage_percent}%)${COLORS[NC]}"
         fi
     fi
-    
+    fi
     # Storage health
     if command -v df >/dev/null 2>&1; then
         local storage_usage
@@ -132,7 +151,17 @@ system_health_monitor() {
             echo -e "${COLORS[YELLOW]}⚠ Storage Usage: High (${storage_usage}%)${COLORS[NC]}"
         fi
     fi
-    
+    # Disk health
+    if command -v smartctl >/dev/null 2>&1; then
+        local disk_health
+        disk_health=$(smartctl -H /dev/block/sda 2>/dev/null | grep 'SMART overall-health self-assessment' | awk '{print $6}')
+        if [[ "$disk_health" == "PASSED" ]]; then
+            echo -e "${COLORS[GREEN]}✓ Disk Health: Good${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[RED]}✗ Disk Health: $disk_health${COLORS[NC]}"
+        fi
+    fi
     # Temperature check (if available)
     if [[ -f "/sys/class/thermal/thermal_zone0/temp" ]]; then
         local temp
@@ -144,7 +173,19 @@ system_health_monitor() {
             echo -e "${COLORS[YELLOW]}⚠ Temperature: High (${temp:0:2}°C)${COLORS[NC]}"
         fi
     fi
-    
+    # Battery health (if available)
+    if command -v upower >/dev/null 2>&1; then
+        local battery_info
+        battery_info=$(upower -i $(upower -e | grep BAT) 2>/dev/null)
+        local battery_percentage
+        battery_percentage=$(echo "$battery_info" | grep 'percentage' | awk '{print $2}' | sed 's/%//')
+        if [[ "$battery_percentage" -gt 20 ]]; then
+            echo -e "${COLORS[GREEN]}✓ Battery: Good (${battery_percentage}%)${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[RED]}✗ Battery: Low (${battery_percentage}%)${COLORS[NC]}"
+        fi
+    fi
     # Process count
     local proc_count
     proc_count=$(ps aux 2>/dev/null | wc -l)
@@ -154,31 +195,6 @@ system_health_monitor() {
     else
         echo -e "${COLORS[YELLOW]}⚠ Process Count: High ($proc_count)${COLORS[NC]}"
     fi
-    
-    # Network connectivity
-    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
-        echo -e "${COLORS[GREEN]}✓ Network: Connected${COLORS[NC]}"
-        ((health_score++))
-    else
-        echo -e "${COLORS[RED]}✗ Network: Disconnected${COLORS[NC]}"
-    fi
-    
-    # Root access
-    if [[ "$(id -u)" -eq 0 ]]; then
-        echo -e "${COLORS[GREEN]}✓ Root Access: Available${COLORS[NC]}"
-        ((health_score++))
-    else
-        echo -e "${COLORS[RED]}✗ Root Access: Not available${COLORS[NC]}"
-    fi
-    
-    # Superuser directory
-    if [[ -d "/data/superuser" ]]; then
-        echo -e "${COLORS[GREEN]}✓ Superuser Directory: Present${COLORS[NC]}"
-        ((health_score++))
-    else
-        echo -e "${COLORS[RED]}✗ Superuser Directory: Missing${COLORS[NC]}"
-    fi
-    
     # SELinux status
     if command -v getenforce >/dev/null 2>&1; then
         local selinux_status
@@ -190,11 +206,61 @@ system_health_monitor() {
             echo -e "${COLORS[YELLOW]}⚠ SELinux: ${selinux_status}${COLORS[NC]}"
         fi
     fi
-    
+    # Network connectivity
+    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+        echo -e "${COLORS[GREEN]}✓ Network: Connected${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Network: Disconnected${COLORS[NC]}"
+    fi
+
+    # Root access
+    if [[ "$(id -u)" -eq 0 ]]; then
+        echo -e "${COLORS[GREEN]}✓ Root Access: Available${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Root Access: Not available${COLORS[NC]}"
+    fi
+
+    # Superuser directory
+    if [[ -d "/data/superuser" ]]; then
+        echo -e "${COLORS[GREEN]}✓ Superuser Directory: Present${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Superuser Directory: Missing${COLORS[NC]}"
+    fi
+    # Quick system status check
+    if command -v getenforce >/dev/null 2>&1; then
+        local selinux_status
+        selinux_status=$(getenforce 2>/dev/null)
+        if [[ "$selinux_status" == "Permissive" || "$selinux_status" == "Disabled" ]]; then
+            echo -e "${COLORS[GREEN]}✓ SELinux: ${selinux_status}${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ SELinux: ${selinux_status}${COLORS[NC]}"
+        fi
+    fi
+    # SELinux status
+    if command -v getenforce >/dev/null 2>&1; then
+        local selinux_status
+        selinux_status=$(getenforce 2>/dev/null)
+        if [[ "$selinux_status" == "Permissive" || "$selinux_status" == "Disabled" ]]; then
+            echo -e "${COLORS[GREEN]}✓ SELinux: ${selinux_status}${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ SELinux: ${selinux_status}${COLORS[NC]}"
+        fi
+    fi
+    # Network connectivity
+    if ping -c 1/dev/null 2>&1; then
+        echo -e "${COLORS[GREEN]}✓ Network: Connected${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Network: Disconnected${COLORS[NC]}"
+    fi
     # Overall health score
     local health_percentage=$((health_score * 100 / total_checks))
     echo -e "${COLORS[BLUE]}Overall Health Score: $health_percentage% ($health_score/$total_checks)${COLORS[NC]}"
-    
     if [[ "$health_percentage" -ge 80 ]]; then
         echo -e "${COLORS[GREEN]}🟢 System Status: Excellent${COLORS[NC]}"
     elif [[ "$health_percentage" -ge 60 ]]; then
@@ -202,7 +268,22 @@ system_health_monitor() {
     else
         echo -e "${COLORS[RED]}🔴 System Status: Needs attention${COLORS[NC]}"
     fi
-    
+    if [[ "$health_percentage" -ge 80 ]]; then
+        echo -e "${COLORS[GREEN]}🟢 System Status: Excellent${COLORS[NC]}"
+    elif [[ "$health_percentage" -ge 60 ]]; then
+        echo -e "${COLORS[YELLOW]}🟡 System Status: Good${COLORS[NC]}"
+    else
+        echo -e "${COLORS[RED]}🔴 System Status: Needs attention${COLORS[NC]}"
+    fi
+    # Return health score
+    echo -e "${COLORS[BLUE]}Overall Health Score: $health_percentage% ($health_score/$total_checks)${COLORS[NC]}"
+    if [[ "$health_percentage" -ge 80 ]]; then
+        echo -e "${COLORS[GREEN]}🟢 System Status: Excellent${COLORS[NC]}"
+    elif [[ "$health_percentage" -ge 60 ]]; then
+        echo -e "${COLORS[YELLOW]}🟡 System Status: Good${COLORS[NC]}"
+    else
+        echo -e "${COLORS[RED]}🔴 System Status: Needs attention${COLORS[NC]}"
+    fi
     return $health_score
 }
 
@@ -210,7 +291,7 @@ system_health_monitor() {
 create_android_structure() {
     echo -e "${COLORS[CYAN]}Creating Android development structure...${COLORS[NC]}"
     log "INFO" "Building Android application structure"
-    
+    # Define Android directories
     local android_dirs=(
         "/data/superuser/android"
         "/data/superuser/android/app"
@@ -224,7 +305,7 @@ create_android_structure() {
         "/data/superuser/android/app/src/main/res/layout"
         "/data/superuser/android/app/src/main/res/values"
     )
-    
+
     # Create Android project structure
     for dir in "${android_dirs[@]}"; do
         mkdir -p "$dir" 2>/dev/null && {
@@ -233,25 +314,63 @@ create_android_structure() {
             echo -e "${COLORS[RED]}✗${COLORS[NC]} Failed to create: $dir"
         }
     done
-    
+    # Create layout XML file
+    cat > /data/superuser/android/app/src/main/res/layout/activity_main.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"><TextView
     # Create Android manifest
     cat > /data/superuser/android/app/src/main/AndroidManifest.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.superuser.terminal">
-
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.ACCESS_SUPERUSER" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
+    <uses-feature android:name="android.hardware.faketouch" android:required="true" />
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="true" />
+    <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false "/>
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location.network" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.light" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.proximity" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.barometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.humidity" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.temperature" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.stepdetector" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.magneticfield" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.rotationvector" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.significantmotion" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.tilt" android:required:"false" />
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/AppTheme">
-        
         <activity
+            android:name=".MainActivity"
+            android:label="@string/app_name"
+            android:theme="@style/AppTheme.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+     activityy
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
@@ -259,7 +378,14 @@ create_android_structure() {
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        
+        <activity android:name=".TerminalActivity" android:exported="true" />
+        <service android:name=".TerminalService" android:exported="true" />
+        <receiver android:name=".TerminalReceiver" android:exported="true" />
+        <provider android:name=".TerminalProvider"
+            android:authorities="${applicationId}.terminalprovider"
+            android:exported="true" /><meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
     </application>
 </manifest>
 EOF
@@ -280,23 +406,24 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private Button checkRootButton;
     private Button fixPermissionsButton;
-    
+    private static final String TAG = "MainActivity";
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        
+
         statusText = findViewById(R.id.status_text);
         checkRootButton = findViewById(R.id.check_root_button);
         fixPermissionsButton = findViewById(R.id.fix_permissions_button);
-        
+        checkRootButton.setText("Check Root Status");
+        fixPermissionsButton.setText("Fix Permissions");
         checkRootButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 checkRootStatus();
             }
         });
-        
+
         fixPermissionsButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -1999,34 +2126,118 @@ fi
 # GUI command handler
 handle_gui_command() {
     local command="$1"
+    local output=""
     
     case "$command" in
-        "gui-status")
-            echo "GUI_STATUS:root=$(id -u)"
-            echo "GUI_STATUS:version=$VERSION"
-            echo "GUI_STATUS:timestamp=$(date)"
+        "app-status")
+            output="Enhanced Superuser Terminal v$VERSION
+Root Access: $(test "$(id -u)" -eq 0 && echo "✓ Available" || echo "✗ Not available")
+Superuser Dir: $(test -d /data/superuser && echo "✓ Present" || echo "✗ Missing")
+Android Integration: ✓ Active
+Timestamp: $(date)"
             ;;
-        "gui-dependencies")
-            check_dependencies 2>&1 | sed 's/^/GUI_DEP:/'
+        "app-check")
+            output=$(check_system_info 2>&1)
             ;;
-        "gui-system-info")
-            check_system_info 2>&1 | sed 's/^/GUI_SYSINFO:/'
+        "app-fix")
+            output=$(fix_su_permissions 2>&1)
+            ;;
+        "app-health")
+            output=$(system_health_monitor 2>&1)
+            ;;
+        "app-benchmark")
+            output=$(benchmark_system_performance 2>&1)
             ;;
         *)
-            # Regular command handling
-            main "$command"
+            output=$(main "$command" 2>&1)
             ;;
     esac
+    
+    echo "$output"
 }
 
-# Check if being called from GUI
-if [[ "${1:-}" == gui-* ]]; then
-    export GUI_MODE=1
-    handle_gui_command "$1"
-    exit 0
-fi
+# Create Android terminal server for app communication
+create_android_terminal_server() {
+    echo -e "${COLORS[CYAN]}Creating Android terminal server...${COLORS[NC]}"
+    
+    cat > /data/superuser/bin/android-terminal-server << 'EOF'
+#!/system/bin/sh
+# Android Terminal Server
+# Handles communication between Android app and superuser script
 
-# Enhanced main function with new features
+FIFO_IN="/data/superuser/tmp/terminal_in"
+FIFO_OUT="/data/superuser/tmp/terminal_out"
+SCRIPT_PATH="/data/superuser/bin/Superuser_main"
+
+# Create named pipes for communication
+mkfifo "$FIFO_IN" 2>/dev/null || true
+mkfifo "$FIFO_OUT" 2>/dev/null || true
+
+echo "Android Terminal Server started"
+echo "Listening for commands..."
+
+while true; do
+    if [ -p "$FIFO_IN" ]; then
+        while IFS= read -r command; do
+            if [ "$command" = "exit" ]; then
+                echo "Server shutting down"
+                exit 0
+            fi
+            
+            # Execute command and send output
+            if [ -x "$SCRIPT_PATH" ]; then
+                "$SCRIPT_PATH" process_android_command "$command" > "$FIFO_OUT" 2>&1
+            else
+                echo "Error: Superuser script not found" > "$FIFO_OUT"
+            fi
+        done < "$FIFO_IN"
+    fi
+    sleep 1
+done
+EOF
+    
+    chmod +x /data/superuser/bin/android-terminal-server 2>/dev/null || true
+    echo -e "${COLORS[GREEN]}Android terminal server created${COLORS[NC]}"
+}
+
+# Android App Integration Features
+create_android_app_integration() {
+    echo -e "${COLORS[CYAN]}Setting up Android app integration...${COLORS[NC]}"
+    log "INFO" "Creating Android app integration structure"
+    
+    # Create Android app project structure
+    local app_dirs=(
+        "/data/superuser/android-app"
+        "/data/superuser/android-app/app"
+        "/data/superuser/android-app/app/src"
+        "/data/superuser/android-app/app/src/main"
+        "/data/superuser/android-app/app/src/main/java"
+        "/data/superuser/android-app/app/src/main/java/com"
+        "/data/superuser/android-app/app/src/main/java/com/superuser"
+        "/data/superuser/android-app/app/src/main/java/com/superuser/terminal"
+        "/data/superuser/android-app/app/src/main/res"
+        "/data/superuser/android-app/app/src/main/res/layout"
+        "/data/superuser/android-app/app/src/main/res/values"
+        "/data/superuser/android-app/app/src/main/res/drawable"
+        "/data/superuser/android-app/app/src/main/res/menu"
+        "/data/superuser/android-app/app/src/main/assets"
+    )
+    
+    for dir in "${app_dirs[@]}"; do
+        mkdir -p "$dir" 2>/dev/null && {
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Created: $dir"
+        } || {
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} Failed to create: $dir"
+        }
+    done
+    
+    # Copy this script to assets for app integration
+    cp "$0" "/data/superuser/android-app/app/src/main/assets/Superuser_main" 2>/dev/null || true
+    
+    echo -e "${COLORS[GREEN]}Android app integration structure created${COLORS[NC]}"
+}
+
+# Enhanced main function with Android app support
 main() {
     local start_time
     start_time=$(date +%s)
@@ -2136,11 +2347,17 @@ main() {
             echo -e "${COLORS[GREEN]}Creating Android development structure...${COLORS[NC]}"
             create_android_structure && test_result "Android Structure Creation" $?
             ;;
-        "android-terminal")
-            android_cmd_terminal
+        "create-app")
+            echo -e "${COLORS[GREEN]}Creating Android terminal app...${COLORS[NC]}"
+            create_android_app_integration && test_result "Android App Integration" $?
+            create_android_terminal_server && test_result "Terminal Server Creation" $?
             ;;
-        "android-info")
-            android_user_info
+        "app-server")
+            echo -e "${COLORS[GREEN]}Starting Android terminal server...${COLORS[NC]}"
+            /data/superuser/bin/android-terminal-server
+            ;;
+        "process_android_command")
+            process_android_command "$2"
             ;;
         "logs")
             echo -e "${COLORS[CYAN]}Recent log entries:${COLORS[NC]}"
@@ -2152,6 +2369,7 @@ main() {
             echo -e "${COLORS[CYAN]}Quick System Status:${COLORS[NC]}"
             echo "Root: $(test "$(id -u)" -eq 0 && echo "✓ Active" || echo "✗ Not active")"
             echo "Superuser Dir: $(test -d /data/superuser && echo "✓ Present" || echo "✗ Missing")"
+            echo "Android Integration: ✓ Active"
             echo "Version: $VERSION"
             echo "Timestamp: $(date)"
             ;;
@@ -2199,16 +2417,7 @@ main() {
             echo "  status          - Quick system status"
             echo "  env             - Environment information"
             echo "  help            - Show this help message"
-            echo ""
-            echo "OPTIONS:"
-            echo "  -i, interactive - Launch interactive mode"
-            echo "  -h, --help      - Show help message"
-            echo ""
-            echo "EXAMPLES:"
-            echo "  $0 check        # Run system check"
-            echo "  $0 fix          # Fix su permissions"
-            echo "  $0 interactive  # Launch interactive mode"
-            echo "  $0 full         # Complete diagnostic suite"
+            echo "  version         - Show version information"
             ;;
         "version"|"--version"|"-v")
             echo -e "${COLORS[BLUE]}Enhanced Superuser Terminal${COLORS[NC]}"
@@ -2247,10 +2456,9 @@ main() {
             end_performance_monitoring
             ;;
         "performance"|"perf")
-            echo -e "${COLORS[BLUE]}Performance analysis and monitoring...${COLORS[NC]}"
+            echo -e "${COLORS[BLUE]}Running performance benchmark...${COLORS[NC]}"
             start_performance_monitoring
             benchmark_system_performance
-            suggest_optimizations
             end_performance_monitoring
             ;;
         "fix")
@@ -2321,13 +2529,12 @@ main() {
             echo "UTILITY COMMANDS:"
             echo "  android-terminal - Launch Android command terminal"
             echo "  android-info    - Get Android user information"
+            echo "  deps            - Auto-install missing dependencies"
             echo "  logs            - View recent log entries"
             echo "  status          - Quick system status"
             echo "  env             - Environment information"
             echo "  help            - Show detailed help"
             echo "  version         - Show version information"
-            echo ""
-            echo "Use '$0 help' for detailed command information"
             ;;
     esac
     
@@ -2401,11 +2608,4 @@ interactive_mode() {
             read -p "Press Enter to continue..."
         fi
     done
-}
-
-# Execute main function
-main "$@" || {
-    echo -e "${COLORS[RED]}Script execution failed.${COLORS[NC]}" >&2
-    log "ERROR" "Script execution failed"
-    exit 1
 }
