@@ -1,11 +1,41 @@
-# Superuser-device
+# Enhanced Superuser Terminal
 
 ![CI Status](https://github.com/mathew-sudo/Superuser-device/workflows/Superuser%20CI%20Tests/badge.svg)
 ![Security Audit](https://img.shields.io/badge/security-audited-green)
 ![Platform](https://img.shields.io/badge/platform-Android-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-A comprehensive utility script for managing superuser access on Android devices. This enhanced tool provides secure installation, configuration, and management of the `su` superuser binary across all standard Android locations.
+A comprehensive Android root management solution with advanced features for system administration, security auditing, and device maintenance.
+
+## 🎯 Key Features
+
+### 🔧 Core Functionality
+- **Automated Su Binary Detection & Fixing** - Intelligent detection and permission repair
+- **System Compatibility Checking** - Comprehensive device and environment analysis
+- **Enhanced Backup & Recovery** - Timestamped backups with integrity verification
+- **Interactive Mode** - User-friendly menu-driven interface
+- **Termux Integration** - Seamless operation within Termux environment
+
+### 🚀 Advanced Features
+- **Performance Monitoring** - Real-time system health and performance tracking
+- **Security Auditing** - Vulnerability assessment and security scoring
+- **Network Diagnostics** - Connectivity testing and network analysis
+- **System Repair Utility** - Automated fixing of common issues
+- **Comprehensive Testing** - Built-in test framework for validation
+- **Advanced Logging** - Multi-level logging with rotation and search
+
+### 🛡️ Security & Safety
+- **Enhanced Error Handling** - Robust error recovery and reporting
+- **Input Validation** - Secure input processing and sanitization
+- **Backup Before Changes** - Automatic backups before any modifications
+- **Permission Verification** - Thorough validation of binary authenticity
+- **SELinux Compatibility** - Works with various SELinux configurations
+
+### 📱 Android Integration
+- **Android Development Tools** - Complete Android project structure generation
+- **ADB Integration** - Direct Android Debug Bridge integration
+- **Device Information** - Detailed Android device and user information
+- **Termux Support** - Enhanced features for Termux environment
 
 ## 🔒 Security Notice
 
@@ -13,7 +43,7 @@ A comprehensive utility script for managing superuser access on Android devices.
 
 This tool modifies critical system files and grants superuser access. Improper use can:
 - **Brick your device** permanently
-- **Void your warranty** completely  
+- **Void your warranty** completely
 - **Compromise device security** if misconfigured
 - **Cause data loss** or system instability
 
@@ -25,59 +55,12 @@ This tool modifies critical system files and grants superuser access. Improper u
 
 ---
 
-## ✨ Enhanced Features
+## 📋 Requirements
 
-### 🛡️ Security & Safety
-- **Input validation** - All user inputs are sanitized and validated
-- **Secure root elevation** - Safe root access mechanisms with validation
-- **Automatic backups** - Critical files backed up before modification
-- **Permission validation** - Comprehensive permission and ownership checks
-- **SELinux awareness** - Detects and handles SELinux policies
-
-### 🔧 System Management
-- **Multi-architecture support** - ARM, ARM64, x86, x86_64 compatibility
-- **Comprehensive diagnostics** - Detailed system information and compatibility checks
-- **Dependency management** - Automatic detection and installation of required tools
-- **Recovery mechanisms** - Error recovery and rollback capabilities
-- **Interactive mode** - User-friendly menu-driven interface
-
-### 📊 Monitoring & Logging
-- **Comprehensive logging** - Detailed operation logs with timestamps
-- **Performance monitoring** - Execution time and resource usage tracking
-- **Status reporting** - Real-time progress and status updates
-- **Troubleshooting guidance** - Built-in diagnostic and recovery suggestions
-
----
-
-## 📋 Prerequisites
-
-### System Requirements
-- **Linux-based system** (Ubuntu 18.04+ recommended)
-- **Root access** on the host system
-- **USB debugging enabled** on Android device
-- **Minimum 100MB free space** for tools and backups
-
-### Required Tools
-```bash
-# Essential tools (auto-installed if missing)
-sudo apt-get update
-sudo apt-get install -y \
-    git wget unzip curl \
-    android-tools-adb android-tools-fastboot \
-    build-essential cmake \
-    shellcheck jq
-
-# Optional but recommended
-sudo apt-get install -y \
-    android-sdk-platform-tools \
-    android-sdk-build-tools
-```
-
-### Android Device Requirements
-- **Android 5.0+** (API level 21+)
-- **USB debugging enabled** in Developer Options
-- **Bootloader unlocked** (for system modifications)
-- **Custom recovery** (TWRP recommended) for safety
+- Android device with root access
+- Terminal emulator (Termux recommended)
+- Bash shell
+- Basic system utilities (stat, chmod, chown, etc.)
 
 ---
 
@@ -119,241 +102,182 @@ adb pull /sdcard/recovery_backup.img ./backups/
 
 ## 🚀 Installation & Usage
 
-### Quick Start
+### Quick Installation
+
+1. Download the files to your Android device
+2. Make the installer executable:
+   ```bash
+   chmod +x install.sh
+   ```
+3. Run the installer as root:
+   ```bash
+   su -c ./install.sh
+   ```
+
+### Manual Installation
+
+1. Run the main script to build the structure:
+   ```bash
+   ./Superuser_main build
+   ```
+2. Install the script to the superuser directory:
+   ```bash
+   ./Superuser_main install
+   ```
+
+### Basic Commands
+
 ```bash
-# Clone the repository
-git clone https://github.com/mathew-sudo/Superuser-device.git
-cd Superuser-device
+# Run system check
+superuser check
 
-# Make executable
-chmod +x Superuser_main
+# Fix su permissions
+superuser fix
 
-# Run comprehensive system check
-sudo ./Superuser_main check
+# Create backup
+superuser backup
 
-# Interactive mode (recommended for beginners)
-sudo ./Superuser_main interactive
+# Launch interactive mode
+superuser interactive
+
+# Run full diagnostic suite
+superuser full
 ```
 
-### Available Commands
+### Interactive Mode
+
+The interactive mode provides a user-friendly menu interface:
+
 ```bash
-# System operations
-sudo ./Superuser_main check          # Full system check and validation
-sudo ./Superuser_main backup         # Create backup of critical files
-sudo ./Superuser_main interactive    # Launch interactive menu
-
-# Android device operations  
-sudo ./Superuser_main android-term   # Launch Android terminal via ADB
-sudo ./Superuser_main android-user   # Display Android user information
-
-# Help and information
-./Superuser_main                     # Show available options
+superuser interactive
 ```
 
-### Interactive Mode Features
-1. **Full system check** - Comprehensive diagnostic and compatibility testing
-2. **Permission management** - Fix and validate su binary permissions
-3. **Android terminal** - Direct access to device shell
-4. **User information** - Display device and user details
-5. **Backup creation** - Create timestamped backups
-6. **Log viewing** - Review operation logs and history
+### Tool Launcher
 
----
+Use the tool launcher for quick access:
 
-## 📂 Installation Locations
-
-The script installs `su` binaries to all standard Android locations:
-
-### Primary Locations
-- `/system/bin/su` - Standard system binary location
-- `/system/xbin/su` - Extended system binaries
-- `/sbin/su` - System administration binaries
-
-### Secondary Locations  
-- `/su/bin/su` - Dedicated su directory
-- `/su/xbin/su` - Extended su binaries
-- `/system/sbin/su` - Alternative system location
-
-### Specialized Locations
-- `/magisk/.core/bin/su` - Magisk integration
-- `/debug_ramdisk/su` - Debug/development builds
-- `/system/xbin/daemonsu` - SuperSU compatibility
-- `/system/xbin/busybox` - BusyBox integration
-
-### Legacy/Alternative Locations
-- `/bin/su`, `/xbin/su`, `/0/su` - Various ROM implementations
-
----
-
-## 🔧 Advanced Configuration
-
-### Environment Variables
 ```bash
-# Logging configuration
-export LOG_DIR="/custom/log/path"
-export LOG_LEVEL="DEBUG"
-
-# Test mode (safe for testing)
-export DRY_RUN=1
-export TEST_MODE=1
-
-# Performance tuning
-export TEST_TIMEOUT=600
-export MAX_LOGS=20
-```
-
-### Custom Build Configuration
-```bash
-# Android NDK version
-export ANDROID_NDK_VERSION="r25c"
-
-# Target architectures
-export TARGET_ARCH="arm64-v8a"
-export ANDROID_API_LEVEL=29
+superuser-tool check    # Quick system check
+superuser-tool fix      # Fix permissions
+superuser-tool backup   # Create backup
 ```
 
 ---
 
-## 🐞 Troubleshooting
+## 🔧 Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `check` | Run comprehensive system check |
+| `setup` | Initial setup with optimizations |
+| `build` | Build enhanced directory structure |
+| `structure` | Create directory structure only |
+| `install` | Full installation with setup |
+| `fix` | Fix su permissions with safety checks |
+| `backup` | Create enhanced backup |
+| `benchmark` | Run performance benchmark |
+| `network` | Check network connectivity |
+| `security` | Run security audit |
+| `optimize` | Get optimization suggestions |
+| `full` | Run complete diagnostic suite |
+| `interactive` | Launch interactive mode |
+
+---
+
+## 🏗️ Directory Structure
+
+```
+/data/superuser/
+├── bin/                 # Executable scripts and tools
+│   ├── Superuser_main  # Main script
+│   ├── superuser-tool  # Tool launcher
+│   └── superuser-utils.sh # Utility functions
+├── etc/                # Configuration files
+│   └── profile         # Environment setup
+├── lib/                # Library files
+├── tmp/                # Temporary files
+├── backups/            # System backups
+├── logs/               # Log files
+├── docs/               # Documentation
+├── test-env/           # Testing environment
+├── scripts/            # Utility scripts
+├── config/             # Additional configurations
+└── tools/              # Additional tools
+```
+
+---
+
+## 🔒 Security Features
+
+- **Input Validation**: All user inputs are validated for security
+- **Safe Command Execution**: Protection against command injection
+- **Backup Creation**: Automatic backups before making changes
+- **Permission Verification**: Strict permission checking
+- **Error Handling**: Comprehensive error handling and recovery
+
+---
+
+## 📊 Performance
+
+The Enhanced Superuser Terminal is optimized for:
+- Fast startup and execution
+- Minimal resource usage
+- Parallel processing where safe
+- Efficient dependency checking
+
+---
+
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-#### 1. Permission Denied Errors
-```bash
-# Symptoms: chmod/chown failures
-# Solutions:
-sudo mount -o remount,rw /system
-setenforce 0  # Temporarily disable SELinux
-adb shell su -c "mount -o remount,rw /"
-```
-
-#### 2. Device Not Found
-```bash
-# Check ADB connection
-adb devices
-adb kill-server && adb start-server
-
-# Verify USB debugging
-adb shell getprop ro.debuggable
-```
-
-#### 3. System Partition Read-Only
-```bash
-# Modern Android devices (A/B partitions)
-adb shell su -c "mount -o remount,rw /"
-adb shell su -c "mount -o remount,rw /system"
-
-# Older devices
-adb shell su -c "mount -o remount,rw /system /system"
-```
-
-#### 4. SELinux Policy Violations
-```bash
-# Check SELinux status
-adb shell getenforce
-
-# Temporary solution (not recommended for production)
-adb shell su -c "setenforce 0"
-
-# Permanent solution: Custom SELinux policy
-# (Advanced users only)
-```
-
-### Recovery Procedures
-
-#### Boot Loop Recovery
-1. **Enter recovery mode** (Volume Down + Power)
-2. **Restore NANDroid backup** or **Factory reset**
-3. **Flash stock firmware** if necessary
-4. **Restore from backup** after successful boot
-
-#### System Corruption Recovery
-1. **Boot to custom recovery** (TWRP)
-2. **Mount system partition**
-3. **Restore system backup**:
+1. **Permission Denied**
    ```bash
-   adb push ./backups/system_backup.img /sdcard/
-   adb shell recovery
-   # Use recovery menu to restore
+   # Ensure you're running as root
+   su -c ./Superuser_main
    ```
 
----
+2. **Command Not Found**
+   ```bash
+   # Add to PATH
+   export PATH="/data/superuser/bin:$PATH"
+   ```
 
-## 📊 Continuous Integration
+3. **Log Access**
+   ```bash
+   # View recent logs
+   tail -f /data/superuser/logs/superuser.log
+   ```
 
-### Automated Testing
-- **Security audits** - Automated vulnerability scanning
-- **Code quality** - ShellCheck linting and formatting
-- **Multi-platform testing** - ARM, ARM64, x86, x86_64
-- **Performance benchmarks** - Execution time and memory usage
-- **Integration testing** - Real Android emulator testing
+### Debug Mode
 
-### CI Pipeline Status
-[![CI Tests](https://github.com/mathew-sudo/Superuser-device/actions/workflows/ci.yml/badge.svg)](https://github.com/mathew-sudo/Superuser-device/actions)
-
-View detailed test reports and coverage at: [CI Dashboard](https://github.com/mathew-sudo/Superuser-device/actions)
-
----
-
-## 🔍 System Compatibility
-
-### Supported Android Versions
-- **Android 5.0 - 14** (API 21-34)
-- **AOSP-based ROMs** (LineageOS, Pixel Experience, etc.)
-- **Custom ROMs** with standard partition layouts
-- **Magisk-rooted devices** (enhanced compatibility)
-
-### Supported Architectures
-- **ARM** (armv7a) - Most Android phones/tablets
-- **ARM64** (aarch64) - Modern 64-bit devices  
-- **x86** - Intel-based Android devices
-- **x86_64** - 64-bit Intel Android devices
-
-### Known Limitations
-- **System-as-root devices** may require additional steps
-- **A/B partition devices** need special handling
-- **Heavily modified OEM ROMs** may have compatibility issues
-- **Devices with enforced dm-verity** require disabling
-
----
-
-## 🙏 Contributing
-
-### Development Setup
+Enable verbose logging:
 ```bash
-# Fork and clone the repository
-git clone https://github.com/your-username/Superuser-device.git
-cd Superuser-device
-
-# Install development dependencies
-sudo apt-get install shellcheck shfmt
-
-# Run tests locally
-./scripts/run-tests.sh
+export DEBUG=1
+./Superuser_main check
 ```
 
-### Contribution Guidelines
-1. **Follow shell scripting best practices**
-2. **Add comprehensive tests** for new features
-3. **Update documentation** for changes
-4. **Ensure security compliance** - no vulnerabilities
-5. **Test on multiple devices** before submitting
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
 ---
 
-## 📄 License & Credits
+## 📝 License
 
-### License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is provided as-is for educational and research purposes. Use at your own risk.
 
-### Credits & Acknowledgments
-- **[phhusson/superuser](https://github.com/phhusson/superuser)** - Core su implementation
-- **Android Open Source Project** - Android platform foundation
-- **Magisk Project** - Root management inspiration
-- **XDA Developers Community** - Testing and feedback
-- **GitHub Actions** - CI/CD infrastructure
+## ⚠️ Disclaimer
 
----
+This software is designed for legitimate system administration purposes. Users are responsible for complying with applicable laws and regulations. The authors are not responsible for any misuse or damage caused by this software.
 
 ## 📞 Support & Community
 
@@ -369,17 +293,11 @@ For security vulnerabilities, please email: security@example.com
 
 ---
 
-## 📈 Changelog
+## 🔄 Version History
 
-### Version 1.0-prototype
-- ✨ Enhanced security with input validation
-- 🛡️ Secure root elevation mechanisms  
-- 📊 Comprehensive system diagnostics
-- 🔧 Interactive mode with menu interface
-- 📝 Detailed logging and error reporting
-- 🔄 Automatic backup and recovery
-- 🧪 Extensive CI/CD testing pipeline
+- **v1.1-enhanced**: Complete rewrite with advanced features
+- **v1.0**: Initial release
 
 ---
 
-**⚠️ Final Reminder: Use at your own risk. Always maintain proper backups and understand the implications of system modifications.**
+**Made with ❤️ for the Android community**
