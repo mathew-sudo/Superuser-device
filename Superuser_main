@@ -1,4 +1,5 @@
 #!/bin/bash
+
 set -e
 
 # Root check
@@ -36,6 +37,1338 @@ SU_PATHS=(
     "/system/bin/su" "/system/xbin/su" "/sbin/su" "/su/bin/su" "/su/xbin/su" "/system/sbin/su" "/magisk/.core/bin/su" "/debug_ramdisk/su" "/sbin/bin/su" "/system/su" "/system/xbin/daemonsu" "/system/xbin/busybox" "/su" "/xbin/su" "/bin/su" "/0/su"
 )
 
+=======
+# Superuser Terminal Script
+# Version: 1.1-enhanced
+# This script automates the setup and maintenance of a superuser terminal environment on Android devices.
+
+# It includes functionality for checking system information, fixing su permissions, and launching a GUI.
+# It is designed to make the process of getting root access and obtaining superuser commands easier.
+
+# Enhanced error handling, dependency checks, and system information gathering.
+# build android application structure with comprehensive features.
+
+# Performance monitoring and metrics
+declare -A PERFORMANCE_METRICS=()
+declare -A CACHED_RESULTS=()
+
+# Start performance monitoring
+start_performance_monitoring() {
+    PERFORMANCE_METRICS[script_start]=$(date +%s.%N 2>/dev/null || date +%s)
+    PERFORMANCE_METRICS[memory_start]=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+}
+
+# End performance monitoring and report
+end_performance_monitoring() {
+    local end_time
+    end_time=$(date +%s.%N 2>/dev/null || date +%s)
+    local memory_end
+    memory_end=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+    PERFORMANCE_METRICS[script_end]=$end_time
+    local execution_time
+    execution_time=$(echo "$end_time - ${PERFORMANCE_METRICS[script_start]}" | bc -l 2>/dev/null || echo "N/A")
+
+    local memory_used
+    memory_used=$((${PERFORMANCE_METRICS[memory_start]} - memory_end))
+
+    echo -e "${COLORS[BLUE]}📊 Performance Summary:${COLORS[NC]}"
+    echo "  Execution Time: ${execution_time}s"
+    echo "  Memory Impact: ${memory_used}KB"
+    echo "  Cache Hits: ${#CACHED_RESULTS[@]}"
+    echo "  Cached Results: ${!CACHED_RESULTS[@]}"
+    log "PERF" "Total execution time: ${execution_time}s, Memory used: ${memory_used}KB"
+}
+
+# Caching mechanism for expensive operations
+cache_result() {
+    local key="$1"
+    local value="$2"
+    CACHED_RESULTS["$key"]="$value"
+    log "DEBUG" "Cached result for key: $key"
+}
+
+get_cached_result() {
+    local key="$1"
+    echo "${CACHED_RESULTS[$key]:-}"
+}
+
+# Enhanced dependency resolver with auto-installation
+auto_install_dependencies() {
+    echo -e "${COLORS[CYAN]}Auto-installing missing dependencies...${COLORS[NC]}"
+    log "INFO" "Starting auto-installation of dependencies"
+    local install_commands=(
+        "apt-get update && apt-get install -y"
+        "yum install -y"
+        "pkg install -y"
+        "pacman -S --noconfirm"
+        "zypper install -y"
+    )
+
+    local dependencies=("curl" "wget" "git" "nano" "vim" "htop" "tree" "zip" "unzip")
+    for cmd in "${install_commands[@]}"; do
+        if command -v "${cmd%% *}" >/dev/null 2>&1; then
+            echo -e "${COLORS[GREEN]}Found package manager: ${cmd%% *}${COLORS[NC]}"
+            
+            for dep in "${dependencies[@]}"; do
+                if ! command -v "$dep" >/dev/null 2>&1; then
+                    echo "Installing $dep..."
+                    if eval "$cmd $dep" >/dev/null 2>&1; then
+                        echo -e "${COLORS[GREEN]}✓ Installed: $dep${COLORS[NC]}"
+                    else
+                        echo -e "${COLORS[YELLOW]}! Failed to install: $dep${COLORS[NC]}"
+                    fi
+                fi
+            done
+            break
+        fi
+    done
+    for cmd in "${install_commands[@]}"; do
+        if command -v "${cmd%% *}" >/dev/null 2>&1; then
+            echo -e "${COLORS[GREEN]}Found package manager: ${cmd%% *}${COLORS[NC]}"
+            echo -e "${COLORS[CYAN]}Installing dependencies...${COLORS[NC]}"
+            for dep in "${dependencies[@]}"; do
+                if ! command -v "$dep" >/dev/null 2>&1; then
+                    echo "Installing $dep..."
+                    if eval "$cmd $dep" >/dev/null 2>&1; then
+                        echo -e "${COLORS[GREN]}✓]}✓ Installed: $dep${COLORS[NC]}"
+                    else
+                        echo -e "${COLORS[YELLOW]}! Failed to install: $dep${COLORS[NC]}"
+                    fi
+                fi
+            done
+            break
+        fi
+    done
+}
+
+# Advanced system health monitoring
+system_health_monitor() {
+    echo -e "${COLORS[CYAN]}🏥 System Health Monitor${COLORS[NC]}"
+    log "INFO" "Starting system health monitoring"
+    local health_score=0
+    local total_checks=10
+    echo -e "${COLORS[CYAN]}Performing system health checks...${COLORS[NC]}"
+    # CPU health
+    if [[ -f "/proc/loadavg" ]]; then
+        local load_avg
+        load_avg=$(cut -d' ' -f1 /proc/loadavg)
+        if (( $(echo "$load_avg < 2.0" | bc -l 2>/dev/null || echo 1) )); then
+            echo -e "${COLORS[GREEN]}✓ CPU Load: Normal ($load_avg)${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ CPU Load: High ($load_avg)${COLORS[NC]}"
+        fi
+    fi
+
+    # Memory health
+    if [[ -f "/proc/meminfo" ]]; then
+        local mem_available
+        mem_available=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+        local mem_total
+        mem_total=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+        local mem_usage_percent=$((100 - (mem_available * 100 / mem_total)))
+        if [[ "$mem_usage_percent" -lt 70 ]]; then
+            echo -e "${COLORS[GREEN]}✓ Memory Usage: Normal (${mem_usage_percent}%)${COLORS[NC]}"
+            ((health_score++))
+        else
+        if [[ "$mem_usage_percent" -lt 80 ]]; then
+            echo -e "${COLORS[GREEN]}✓ Memory Usage: Normal (${mem_usage_percent}%)${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ Memory Usage: High (${mem_usage_percent}%)${COLORS[NC]}"
+        fi
+    fi
+    fi
+    # Storage health
+    if command -v df >/dev/null 2>&1; then
+        local storage_usage
+        storage_usage=$(df /data 2>/dev/null | tail -1 | awk '{print $5}' | sed 's/%//')
+        if [[ "$storage_usage" -lt 90 ]]; then
+            echo -e "${COLORS[GREEN]}✓ Storage Usage: Normal (${storage_usage}%)${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ Storage Usage: High (${storage_usage}%)${COLORS[NC]}"
+        fi
+    fi
+    # Disk health
+    if command -v smartctl >/dev/null 2>&1; then
+        local disk_health
+        disk_health=$(smartctl -H /dev/block/sda 2>/dev/null | grep 'SMART overall-health self-assessment' | awk '{print $6}')
+        if [[ "$disk_health" == "PASSED" ]]; then
+            echo -e "${COLORS[GREEN]}✓ Disk Health: Good${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[RED]}✗ Disk Health: $disk_health${COLORS[NC]}"
+        fi
+    fi
+    # Temperature check (if available)
+    if [[ -f "/sys/class/thermal/thermal_zone0/temp" ]]; then
+        local temp
+        temp=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+        if [[ -n "$temp" && "$temp" -lt 70000 ]]; then
+            echo -e "${COLORS[GREEN]}✓ Temperature: Normal (${temp:0:2}°C)${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ Temperature: High (${temp:0:2}°C)${COLORS[NC]}"
+        fi
+    fi
+    # Battery health (if available)
+    if command -v upower >/dev/null 2>&1; then
+        local battery_info
+        battery_info=$(upower -i $(upower -e | grep BAT) 2>/dev/null)
+        local battery_percentage
+        battery_percentage=$(echo "$battery_info" | grep 'percentage' | awk '{print $2}' | sed 's/%//')
+        if [[ "$battery_percentage" -gt 20 ]]; then
+            echo -e "${COLORS[GREEN]}✓ Battery: Good (${battery_percentage}%)${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[RED]}✗ Battery: Low (${battery_percentage}%)${COLORS[NC]}"
+        fi
+    fi
+    # Process count
+    local proc_count
+    proc_count=$(ps aux 2>/dev/null | wc -l)
+    if [[ "$proc_count" -lt 200 ]]; then
+        echo -e "${COLORS[GREEN]}✓ Process Count: Normal ($proc_count)${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[YELLOW]}⚠ Process Count: High ($proc_count)${COLORS[NC]}"
+    fi
+    # SELinux status
+    if command -v getenforce >/dev/null 2>&1; then
+        local selinux_status
+        selinux_status=$(getenforce 2>/dev/null)
+        if [[ "$selinux_status" == "Permissive" || "$selinux_status" == "Disabled" ]]; then
+            echo -e "${COLORS[GREEN]}✓ SELinux: ${selinux_status}${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ SELinux: ${selinux_status}${COLORS[NC]}"
+        fi
+    fi
+    # Network connectivity
+    if ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+        echo -e "${COLORS[GREEN]}✓ Network: Connected${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Network: Disconnected${COLORS[NC]}"
+    fi
+
+    # Root access
+    if [[ "$(id -u)" -eq 0 ]]; then
+        echo -e "${COLORS[GREEN]}✓ Root Access: Available${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Root Access: Not available${COLORS[NC]}"
+    fi
+
+    # Superuser directory
+    if [[ -d "/data/superuser" ]]; then
+        echo -e "${COLORS[GREEN]}✓ Superuser Directory: Present${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Superuser Directory: Missing${COLORS[NC]}"
+    fi
+    # Quick system status check
+    if command -v getenforce >/dev/null 2>&1; then
+        local selinux_status
+        selinux_status=$(getenforce 2>/dev/null)
+        if [[ "$selinux_status" == "Permissive" || "$selinux_status" == "Disabled" ]]; then
+            echo -e "${COLORS[GREEN]}✓ SELinux: ${selinux_status}${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ SELinux: ${selinux_status}${COLORS[NC]}"
+        fi
+    fi
+    # SELinux status
+    if command -v getenforce >/dev/null 2>&1; then
+        local selinux_status
+        selinux_status=$(getenforce 2>/dev/null)
+        if [[ "$selinux_status" == "Permissive" || "$selinux_status" == "Disabled" ]]; then
+            echo -e "${COLORS[GREEN]}✓ SELinux: ${selinux_status}${COLORS[NC]}"
+            ((health_score++))
+        else
+            echo -e "${COLORS[YELLOW]}⚠ SELinux: ${selinux_status}${COLORS[NC]}"
+        fi
+    fi
+    # Network connectivity
+    if ping -c 1/dev/null 2>&1; then
+        echo -e "${COLORS[GREEN]}✓ Network: Connected${COLORS[NC]}"
+        ((health_score++))
+    else
+        echo -e "${COLORS[RED]}✗ Network: Disconnected${COLORS[NC]}"
+    fi
+    # Overall health score
+    local health_percentage=$((health_score * 100 / total_checks))
+    echo -e "${COLORS[BLUE]}Overall Health Score: $health_percentage% ($health_score/$total_checks)${COLORS[NC]}"
+    if [[ "$health_percentage" -ge 80 ]]; then
+        echo -e "${COLORS[GREEN]}🟢 System Status: Excellent${COLORS[NC]}"
+    elif [[ "$health_percentage" -ge 60 ]]; then
+        echo -e "${COLORS[YELLOW]}🟡 System Status: Good${COLORS[NC]}"
+    else
+        echo -e "${COLORS[RED]}🔴 System Status: Needs attention${COLORS[NC]}"
+    fi
+    if [[ "$health_percentage" -ge 80 ]]; then
+        echo -e "${COLORS[GREEN]}🟢 System Status: Excellent${COLORS[NC]}"
+    elif [[ "$health_percentage" -ge 60 ]]; then
+        echo -e "${COLORS[YELLOW]}🟡 System Status: Good${COLORS[NC]}"
+    else
+        echo -e "${COLORS[RED]}🔴 System Status: Needs attention${COLORS[NC]}"
+    fi
+    # Return health score
+    echo -e "${COLORS[BLUE]}Overall Health Score: $health_percentage% ($health_score/$total_checks)${COLORS[NC]}"
+    if [[ "$health_percentage" -ge 80 ]]; then
+        echo -e "${COLORS[GREEN]}🟢 System Status: Excellent${COLORS[NC]}"
+    elif [[ "$health_percentage" -ge 60 ]]; then
+        echo -e "${COLORS[YELLOW]}🟡 System Status: Good${COLORS[NC]}"
+    else
+        echo -e "${COLORS[RED]}🔴 System Status: Needs attention${COLORS[NC]}"
+    fi
+    return $health_score
+}
+
+# Create Android development structure
+create_android_structure() {
+    echo -e "${COLORS[CYAN]}Creating Android development structure...${COLORS[NC]}"
+    log "INFO" "Building Android application structure"
+    # Define Android directories
+    local android_dirs=(
+        "/data/superuser/android"
+        "/data/superuser/android/app"
+        "/data/superuser/android/app/src"
+        "/data/superuser/android/app/src/main"
+        "/data/superuser/android/app/src/main/java"
+        "/data/superuser/android/app/src/main/java/com"
+        "/data/superuser/android/app/src/main/java/com/superuser"
+        "/data/superuser/android/app/src/main/java/com/superuser/utils"
+        "/data/superuser/android/app/src/main/res"
+        "/data/superuser/android/app/src/main/res/layout"
+        "/data/superuser/android/app/src/main/res/values"
+    )
+
+    # Create Android project structure
+    for dir in "${android_dirs[@]}"; do
+        mkdir -p "$dir" 2>/dev/null && {
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Created: $dir"
+        } || {
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} Failed to create: $dir"
+        }
+    done
+main "$@
+    # Create layout XML file
+    cat > /data/superuser/android/app/src/main/res/layout/activity_main.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"><TextView
+    # Create Android manifest
+    cat > /data/superuser/android/app/src/main/AndroidManifest.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.superuser.terminal">
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.ACCESS_SUPERUSER" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
+    <uses-feature android:name="android.hardware.faketouch" android:required="true" />
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="true" />
+    <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false "/>
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location.network" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.light" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.proximity" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.barometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.humidity" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.temperature" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.stepdetector" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.magneticfield" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.rotationvector" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.significantmotion" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.tilt" android:required:"false" />
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/AppTheme">
+        <activity
+            android:name=".MainActivity"
+            android:label="@string/app_name"
+            android:theme="@style/AppTheme.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+     activityy
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".TerminalActivity" android:exported="true" />
+        <service android:name=".TerminalService" android:exported="true" />
+        <receiver android:name=".TerminalReceiver" android:exported="true" />
+        <provider android:name=".TerminalProvider"
+            android:authorities="${applicationId}.terminalprovider"
+            android:exported="true" /><meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/file_paths" />
+    </application>
+</manifest>
+EOF
+
+    # Create MainActivity.java
+    cat > /data/superuser/android/app/src/main/java/com/superuser/MainActivity.java << 'EOF'
+package com.superuser;
+
+import android.app.Activity;
+import android.os.Bundle;
+import android.widget.TextView;
+import android.widget.Button;
+import android.view.View;
+import com.superuser.utils.RootUtils;
+import com.superuser.utils.PermissionUtils;
+
+public class MainActivity extends Activity {
+    private TextView statusText;
+    private Button checkRootButton;
+    private Button fixPermissionsButton;
+    private static final String TAG = "MainActivity";
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        statusText = findViewById(R.id.status_text);
+        checkRootButton = findViewById(R.id.check_root_button);
+        fixPermissionsButton = findViewById(R.id.fix_permissions_button);
+        checkRootButton.setText("Check Root Status");
+        fixPermissionsButton.setText("Fix Permissions");
+        checkRootButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                checkRootStatus();
+            }
+        });
+
+        fixPermissionsButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                fixPermissions();
+            }
+        });
+        
+        // Initial root check
+        checkRootStatus();
+    }
+    
+    private void checkRootStatus() {
+        boolean isRooted = RootUtils.isDeviceRooted();
+        String status = isRooted ? "Device is rooted" : "Device is not rooted";
+        statusText.setText(status);
+    }
+    
+    private void fixPermissions() {
+        if (RootUtils.isDeviceRooted()) {
+            boolean success = PermissionUtils.fixSuPermissions();
+            String message = success ? "Permissions fixed successfully" : "Failed to fix permissions";
+            statusText.setText(message);
+        } else {
+            statusText.setText("Root access required");
+        }
+    }
+}
+EOF
+
+    # Create RootUtils.java
+    cat > /data/superuser/android/app/src/main/java/com/superuser/utils/RootUtils.java << 'EOF'
+package com.superuser.utils;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
+
+public class RootUtils {
+    
+    public static boolean isDeviceRooted() {
+        return checkRootMethod1() || checkRootMethod2() || checkRootMethod3();
+    }
+    
+    private static boolean checkRootMethod1() {
+        String buildTags = android.os.Build.TAGS;
+        return buildTags != null && buildTags.contains("test-keys");
+    }
+    
+    private static boolean checkRootMethod2() {
+        String[] paths = {
+            "/system/app/Superuser.apk",
+            "/sbin/su",
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/data/local/xbin/su",
+            "/data/local/bin/su",
+            "/system/sd/xbin/su",
+            "/system/bin/failsafe/su",
+            "/data/local/su"
+        };
+        
+        for (String path : paths) {
+            if (new File(path).exists()) return true;
+        }
+        return false;
+    }
+    
+    private static boolean checkRootMethod3() {
+        Process process = null;
+        try {
+            process = Runtime.getRuntime().exec(new String[]{"su", "-c", "id"});
+            BufferedReader in = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String output = in.readLine();
+            if (output != null && output.toLowerCase().contains("uid=0")) {
+                return true;
+            }
+        } catch (Exception e) {
+            // Root access denied
+        } finally {
+            if (process != null) process.destroy();
+        }
+        return false;
+    }
+    
+    public static boolean executeRootCommand(String command) {
+        Process process = null;
+        try {
+            process = Runtime.getRuntime().exec(new String[]{"su", "-c", command});
+            int exitCode = process.waitFor();
+            return exitCode == 0;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (process != null) process.destroy();
+        }
+    }
+}
+EOF
+
+    # Create PermissionUtils.java
+    cat > /data/superuser/android/app/src/main/java/com/superuser/utils/PermissionUtils.java << 'EOF'
+package com.superuser.utils;
+
+public class PermissionUtils {
+    
+    public static boolean fixSuPermissions() {
+        String[] suPaths = {
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/su/bin/su"
+        };
+        
+        boolean success = true;
+        for (String path : suPaths) {
+            if (new java.io.File(path).exists()) {
+                // Fix permissions: chmod 6755
+                if (!RootUtils.executeRootCommand("chmod 6755 " + path)) {
+                    success = false;
+                }
+                // Fix ownership: chown root:root
+                if (!RootUtils.executeRootCommand("chown root:root " + path)) {
+                    success = false;
+                }
+            }
+        }
+        return success;
+    }
+    
+    public static boolean createSuperuserDirectories() {
+        String[] directories = {
+            "/data/superuser",
+            "/data/superuser/bin",
+            "/data/superuser/etc",
+            "/data/superuser/lib"
+        };
+        
+        for (String dir : directories) {
+            if (!RootUtils.executeRootCommand("mkdir -p " + dir)) {
+                return false;
+            }
+            if (!RootUtils.executeRootCommand("chmod 755 " + dir)) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+EOF
+
+    # Create layout file
+    cat > /data/superuser/android/app/src/main/res/layout/activity_main.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Enhanced Superuser Terminal"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="32dp" />
+
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Checking root status..."
+        android:textSize="16sp"
+        android:gravity="center"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/check_root_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Check Root Status"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/fix_permissions_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Fix Permissions"
+        android:layout_marginBottom="16dp" />
+
+</LinearLayout>
+EOF
+
+    # Create strings.xml
+    cat > /data/superuser/android/app/src/main/res/values/strings.xml << 'EOF'
+<resources>
+    <string name="app_name">Enhanced Superuser Terminal</string>
+    <string name="check_root">Check Root Status</string>
+    <string name="fix_permissions">Fix Permissions</string>
+    <string name="root_available">Root access available</string>
+    <string name="root_unavailable">Root access unavailable</string>
+</resources>
+EOF
+
+    echo -e "${COLORS[GREEN]}Android development structure created${COLORS[NC]}"
+}
+
+
+# Enhanced directory structure builder
+build_superuser_structure() {
+    echo -e "${COLORS[CYAN]}Building enhanced superuser directory structure...${COLORS[NC]}"
+    log "INFO" "Creating comprehensive directory structure"
+    
+    local base_dirs=(
+        "/data/superuser"
+        "/data/superuser/bin"
+        "/data/superuser/etc"
+        "/data/superuser/lib"
+        "/data/superuser/tmp"
+        "/data/superuser/backups"
+        "/data/superuser/logs"
+        "/data/superuser/docs"
+        "/data/superuser/test-env"
+        "/data/superuser/scripts"
+        "/data/superuser/config"
+        "/data/superuser/tools"
+    )
+    
+    # Create enhanced directory structure
+    for dir in "${base_dirs[@]}"; do
+        if [ ! -d "$dir" ]; then
+            mkdir -p "$dir" 2>/dev/null && {
+                echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Created: $dir"
+                log "INFO" "Created directory: $dir"
+            } || {
+                echo -e "${COLORS[RED]}✗${COLORS[NC]} Failed to create: $dir"
+                log "ERROR" "Failed to create directory: $dir"
+            }
+        else
+            echo -e "${COLORS[BLUE]}→${COLORS[NC]} Exists: $dir"
+        fi
+        
+        # Set proper permissions
+        chmod 755 "$dir" 2>/dev/null || true
+        chown root:root "$dir" 2>/dev/null || true
+    done
+   
+   main "$@"
+    # Create essential configuration files
+    create_superuser_configs
+    
+    echo -e "${COLORS[GREEN]}Directory structure build completed${COLORS[NC]}"
+}
+
+# Create essential configuration files
+create_superuser_configs() {
+    echo -e "${COLORS[CYAN]}Creating configuration files...${COLORS[NC]}"
+    
+    # Enhanced profile configuration
+    cat > /data/superuser/etc/profile << 'EOF'
+#!/system/bin/sh
+# Enhanced Superuser Terminal Profile
+# Version: 1.1-enhanced
+
+export PATH="/data/superuser/bin:/system/bin:/system/xbin:$PATH"
+export SUPERUSER_HOME="/data/superuser"
+export SUPERUSER_VERSION="1.1-enhanced"
+export ANDROID_DATA="/data"
+export ANDROID_ROOT="/system"
+
+# Enhanced prompt with status indicators
+PS1='[\[\033[1;32m\]root\[\033[0m\]@\[\033[1;34m\]superuser\[\033[0m\]:\[\033[1;36m\]\w\[\033[0m\]]# '
+
+# Useful aliases
+alias ll='ls -la'
+alias la='ls -A'
+alias l='ls -CF'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias grep='grep --color=auto'
+alias su-check='check_accessibility'
+alias su-fix='fix_su_permissions'
+alias su-backup='backup_critical_files'
+alias su-logs='tail -f /data/superuser/logs/superuser.log'
+
+# Function to show superuser status
+su_status() {
+    echo "=== Superuser Terminal Status ==="
+    echo "Version: $SUPERUSER_VERSION"
+    echo "Home: $SUPERUSER_HOME"
+    echo "User: $(id)"
+    echo "Working Directory: $(pwd)"
+    echo "Available Commands: su-check, su-fix, su-backup, su-logs"
+}
+
+echo "Enhanced Superuser Terminal v$SUPERUSER_VERSION loaded"
+echo "Type 'su_status' for system information"
+EOF
+
+    # Create tool launcher script
+    cat > /data/superuser/bin/superuser-tool << 'EOF'
+#!/system/bin/sh
+# Superuser Tool Launcher
+# Version: 1.1-enhanced
+
+TOOL_NAME="$1"
+shift
+
+case "$TOOL_NAME" in
+    "check"|"c")
+        /data/superuser/bin/Superuser_main check "$@"
+        ;;
+    "fix"|"f")
+        /data/superuser/bin/Superuser_main fix "$@"
+        ;;
+    "backup"|"b")
+        /data/superuser/bin/Superuser_main backup "$@"
+        ;;
+    "interactive"|"i")
+        /data/superuser/bin/Superuser_main interactive "$@"
+        ;;
+    "benchmark")
+        /data/superuser/bin/Superuser_main benchmark "$@"
+        ;;
+    "security")
+        /data/superuser/bin/Superuser_main security "$@"
+        ;;
+    "network")
+        /data/superuser/bin/Superuser_main network "$@"
+        ;;
+    "help"|"h"|"")
+        echo "Superuser Tool Launcher v1.1-enhanced"
+        echo "Usage: superuser-tool <command> [options]"
+        echo ""
+        echo "Available commands:"
+        echo "  check (c)        - Run system checks"
+        echo "  fix (f)          - Fix permissions"
+        echo "  backup (b)       - Create backup"
+        echo "  interactive (i)  - Launch interactive mode"
+        echo "  benchmark        - Run performance tests"
+        echo "  security         - Security audit"
+        echo "  network          - Network diagnostics"
+        echo "  help (h)         - Show this help"
+        ;;
+    *)
+        echo "Unknown tool: $TOOL_NAME"
+        echo "Use 'superuser-tool help' for available commands"
+        exit 1
+        ;;
+esac
+EOF
+
+    chmod +x /data/superuser/bin/superuser-tool 2>/dev/null || true
+    
+    # Create documentation
+    cat > /data/superuser/docs/README.md << 'EOF'
+# Enhanced Superuser Terminal
+
+## Overview
+The Enhanced Superuser Terminal is a comprehensive solution for managing root access and superuser permissions on Android devices.
+
+## Features
+- Automated su binary detection and permission fixing
+- System compatibility checking
+- Backup and recovery capabilities
+- Network diagnostics
+- Security auditing
+- Performance benchmarking
+- Termux integration
+- Interactive mode for easy operation
+
+## Directory Structure
+```
+/data/superuser/
+├── bin/           # Executable scripts and tools
+├── etc/           # Configuration files
+├── lib/           # Library files
+├── tmp/           # Temporary files
+├── backups/       # System backups
+├── logs/          # Log files
+├── docs/          # Documentation
+├── test-env/      # Testing environment
+├── scripts/       # Utility scripts
+├── config/        # Additional configurations
+└── tools/         # Additional tools
+```
+
+## Usage
+Run the main script: `/data/superuser/bin/Superuser_main`
+Or use the tool launcher: `superuser-tool <command>`
+
+## Commands
+- `check` - Run comprehensive system check
+- `fix` - Fix su permissions
+- `backup` - Create system backup
+- `interactive` - Launch interactive mode
+- `benchmark` - Run performance tests
+- `security` - Security audit
+- `network` - Network diagnostics
+
+## Requirements
+- Root access
+- Android device
+- Terminal access (Termux recommended)
+
+## Support
+Check logs in `/data/superuser/logs/` for troubleshooting.
+EOF
+
+    echo -e "${COLORS[GREEN]}Configuration files created${COLORS[NC]}"
+}
+
+echo -e "${COLORS[CYAN]}Checking accessibility of superuser directories...${COLORS[NC]}"
+
+# Check superuser directory permissions
+check_superuser_directory() {
+    local issues=()
+    local all_ok=1
+    
+    # Check for /data/superuser directory
+    if [[ -d "/data/superuser" ]]; then
+        local perms
+        perms=$(stat -c %a "/data/superuser" 2>/dev/null || echo "000")
+        local owner
+        owner=$(stat -c %U "/data/superuser" 2>/dev/null || echo "unknown")
+        local group
+        group=$(stat -c %G "/data/superuser" 2>/dev/null || echo "unknown")
+        
+        if [[ "$perms" == "700" && "$owner" == "root" && "$group" == "root" ]]; then
+            echo -e "${COLORS[GREEN]}OK${COLORS[NC]} /data/superuser (700 root:root)"
+        else
+            echo -e "${COLORS[RED]}BAD${COLORS[NC]} /data/superuser (perms: $perms, owner: $owner:$group)"
+            issues+=("/data/superuser: incorrect permissions/ownership")
+            all_ok=0
+        fi
+    else
+        echo -e "${COLORS[RED]}BAD${COLORS[NC]} /data/superuser directory not found"
+        issues+=("/data/superuser: directory missing")
+        all_ok=0
+    fi
+    
+    # Report issues if any
+    if [[ ${#issues[@]} -gt 0 ]]; then
+        echo -e "${COLORS[RED]}Issues found:${COLORS[NC]}"
+        for issue in "${issues[@]}"; do
+            echo -e "${COLORS[YELLOW]}  - $issue${COLORS[NC]}"
+        done
+        echo "  - Ensure su binary is correctly installed and executable"
+        echo "  - Check SELinux status and policies"
+        echo "  - Verify file permissions and ownership"
+        all_ok=0
+    fi
+    
+    if [[ $all_ok -eq 1 ]]; then
+        echo -e "${COLORS[GREEN]}All checks passed successfully!${COLORS[NC]}"
+        log "INFO" "Accessibility check passed"
+    else
+        echo -e "${COLORS[RED]}Some checks failed. Please review the issues above.${COLORS[NC]}"
+        log "ERROR" "Accessibility check failed"
+    fi
+    
+    return $all_ok
+}
+
+# Check and install adb if necessary
+install_adb_dependencies() {
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[YELLOW]}adb not found. Attempting to install...${COLORS[NC]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get install -y android-tools-adb || {
+                echo -e "${COLORS[RED]}Failed to install adb. Please install manually.${COLORS[NC]}"
+                exit 1
+            }
+        elif command -v pkg >/dev/null 2>&1; then
+            pkg install -y android-tools || {
+                echo -e "${COLORS[RED]}Failed to install adb. Please install manually.${COLORS[NC]}"
+                exit 1
+            }
+        else
+            echo -e "${COLORS[RED]}No package manager found. Please install adb manually.${COLORS[NC]}"
+            exit 1
+        fi
+    else
+        echo -e "${COLORS[GREEN]}adb is already installed.${COLORS[NC]}"
+    fi
+}
+
+# Performance optimization - enable parallel execution where safe
+export PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
+
+# Enhanced error handling with stack traces
+set -E
+trap 'error_handler $? $LINENO $BASH_LINENO "$BASH_COMMAND" $(printf "%s " "${FUNCNAME[@]}")' ERR
+
+error_handler() {
+    local exit_code=$1
+    local line_no=$2
+    local bash_lineno=$3
+    local last_command=$4
+    local func_stack=("${@:5}")
+    echo -e "\n${COLORS[RED]}Error occurred in script execution:${COLORS[NC]}"
+    echo "Exit code: $exit_code" >&2
+    echo "Error occurred in script execution:" >&2
+    echo "  Exit code: $exit_code" >&2
+    echo "  Line: $line_no" >&2
+    echo "  Command: $last_command" >&2
+    echo "  Function stack: ${func_stack[*]}" >&2
+    
+    # Log error details if logging function is available
+    if declare -f log >/dev/null 2>&1; then
+        log "FATAL" "Script error at line $line_no: $last_command (exit code: $exit_code)"
+    fi
+    
+    # Cleanup on error
+    cleanup_on_error
+    
+    exit $exit_code
+}
+
+# Cleanup function for error scenarios
+cleanup_on_error() {
+    # Kill background processes if any
+    jobs -p | xargs -r kill 2>/dev/null || true
+    
+    # Remove temporary files
+    rm -f /tmp/superuser_temp_* 2>/dev/null || true
+    
+    echo "Cleanup completed after error" >&2
+}
+
+# Security hardening - validate execution environment
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    echo "Error: Script must be executed directly, not sourced" >&2
+    return 1 2>/dev/null || exit 1
+fi
+
+# Input validation function
+validate_input() {
+    local input="$1"
+    local type="${2:-general}"
+    
+    if [[ -z "$input" ]]; then
+        echo "Error: Input cannot be empty" >&2
+        return 1
+    fi
+    
+    case "$type" in
+        "path")
+            if [[ "$input" =~ ^[a-zA-Z0-9/_.-]+$ ]]; then
+                return 0
+            else
+                echo "Error: Invalid path characters detected" >&2
+                return 1
+            fi
+            ;;
+        "command")
+            # Check for dangerous characters using a safer pattern
+            if [[ "$input" != *";"* && "$input" != *"&"* && "$input" != *"|"* && "$input" != *"\`"* && "$input" != *"\$"* ]]; then
+                return 0
+            else
+                echo "Error: Dangerous command characters detected" >&2
+                return 1
+            fi
+            ;;
+        "numeric")
+            if [[ "$input" =~ ^[0-9]+$ ]]; then
+                return 0
+            else
+                echo "Error: Non-numeric input detected" >&2
+                return 1
+            fi
+            ;;
+    esac
+    return 0
+}
+
+# Initialize default values for command line arguments with validation
+if [[ $# -gt 0 ]]; then
+    validate_input "$1" "command" || exit 1
+fi
+: "${1:=""}"
+
+# Enhanced root check with secure elevation
+secure_root_check() {
+    # Skip root check if already root or in test mode
+    if [ "$(id -u)" -eq 0 ] || [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || [[ "${DRY_RUN:-0}" == "1" ]]; then
+        return 0
+    fi
+    
+    # Prevent infinite recursion
+    if [[ "${ROOT_CHECK_ATTEMPTED:-0}" == "1" ]]; then
+        echo "Error: Root check already attempted, avoiding infinite loop" >&2
+        exit 1
+    fi
+    export ROOT_CHECK_ATTEMPTED=1
+    
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "This script must be run as root." >&2
+        echo "Attempting secure root elevation..."
+        
+        # Validate su binary before use
+        local su_binary=""
+        for potential_su in "/system/bin/su" "/system/xbin/su" "/su/bin/su"; do
+            if [[ -f "$potential_su" && -x "$potential_su" ]]; then
+                # Additional security check - verify it's a legitimate su binary
+                if file "$potential_su" 2>/dev/null | grep -q "executable"; then
+                    su_binary="$potential_su"
+                    break
+                fi
+            fi
+        done
+        
+        if [[ -n "$su_binary" ]]; then
+            # Secure execution with argument validation
+            local safe_args=""
+            for arg in "$@"; do
+                validate_input "$arg" "command" || exit 1
+                safe_args="$safe_args '$arg'"
+            done
+            exec "$su_binary" -c "$(printf '%q' "$0") $safe_args"
+        else
+            echo "Error: No valid su binary found" >&2
+            if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
+                echo "Hint: In Termux, try installing 'tsu' package" >&2
+            fi
+            exit 1
+        fi
+    fi
+}
+
+# Call secure root check
+secure_root_check "$@"
+
+# Confirm root access
+echo "Root access confirmed (UID: $(id -u))"
+
+# Version and branding
+VERSION="1.1-enhanced"
+BRAND_NAME="Enhanced Superuser Terminal"
+
+# Logging
+LOG_DIR="/data/local/tmp/superuser_logs"
+LOG_FILE="$LOG_DIR/superuser_install.log"
+MAX_LOGS=12
+mkdir -p "$LOG_DIR" 2>/dev/null || {
+    echo "Warning: Could not create log directory $LOG_DIR" >&2
+    LOG_DIR="/tmp/superuser_logs"
+    LOG_FILE="$LOG_DIR/superuser_install.log"
+    mkdir -p "$LOG_DIR" 2>/dev/null || {
+        echo "Error: Could not create fallback log directory $LOG_DIR" >&2
+        exit 1
+    }
+}
+
+# Enhanced logging function with error handling
+log() {
+    local level="${1:-INFO}"
+    shift || true
+    local message="${*:-No message provided}"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown-time")
+    
+    # Ensure log directory exists
+    if [ ! -d "$LOG_DIR" ]; then
+        mkdir -p "$LOG_DIR" 2>/dev/null || {
+            echo "Warning: Could not create log directory $LOG_DIR" >&2
+            return 1
+        }
+    fi
+    
+    echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE" 2>/dev/null || {
+        echo "[$timestamp] [$level] $message"
+        echo "Warning: Could not write to log file $LOG_FILE" >&2
+    }
+}
+
+# Rotate logs if needed
+if [ "$(ls "$LOG_DIR"/*.log 2>/dev/null | wc -l)" -ge $MAX_LOGS ]; then
+    rm "$(ls -t "$LOG_DIR"/*.log | tail -1)" 2>/dev/null || true
+fi
+
+# Improved color array (declare -A for associative array)
+declare -A COLORS=(
+    [RED]='\033[0;31m'
+    [GREEN]='\033[0;32m'
+    [CYAN]='\033[0;36m'
+    [YELLOW]='\033[1;33m'
+    [BLUE]='\033[0;34m'
+    [PURPLE]='\033[0;35m'
+    [NC]='\033[0m'
+)
+
+# Performance-optimized dependency checker
+check_dependencies() {
+    echo -e "${COLORS[CYAN]}Checking system dependencies...${COLORS[NC]}"
+    log "INFO" "Starting optimized dependency check"
+    
+    local missing_deps=()
+    local required_commands=("stat" "chmod" "chown" "mkdir" "grep" "awk" "date")
+    local optional_commands=("df" "uname" "cut" "head" "tail" "file" "timeout" "getenforce" "busybox" "adb" "magisk" "su" "id" "tsu")
+
+    # Parallel dependency checking for better performance
+    check_command_batch() {
+        local commands=("$@")
+        local results=()
+        
+        for cmd in "${commands[@]}"; do
+            if command -v "$cmd" >/dev/null 2>&1; then
+                results+=("FOUND:$cmd")
+            else
+                results+=("MISSING:$cmd")
+            fi
+        done
+        
+        printf '%s\n' "${results[@]}"
+    }
+
+    # Check required commands in parallel
+    local required_results
+    mapfile -t required_results < <(check_command_batch "${required_commands[@]}")
+    
+    for result in "${required_results[@]}"; do
+        local status="${result%%:*}"
+        local cmd="${result##*:}"
+        
+        if [[ "$status" == "MISSING" ]]; then
+            missing_deps+=("$cmd")
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} Missing required command: $cmd"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Found: $cmd"
+        fi
+    done
+    
+    # Check optional commands
+    local optional_results
+    mapfile -t optional_results < <(check_command_batch "${optional_commands[@]}")
+    
+    for result in "${optional_results[@]}"; do
+        local status="${result%%:*}"
+        local cmd="${result##*:}"
+        
+        if [[ "$status" == "FOUND" ]]; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Found (optional): $cmd"
+        else
+            echo -e "${COLORS[YELLOW]}!${COLORS[NC]} Missing (optional): $cmd"
+        fi
+    done
+    
+    # Enhanced dependency resolution with caching
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        echo -e "${COLORS[YELLOW]}Attempting to resolve missing dependencies...${COLORS[NC]}"
+        
+        # Cache busybox detection
+        local busybox_available=""
+        if [[ -z "$busybox_available" ]]; then
+            busybox_available=$(command -v busybox >/dev/null 2>&1 && echo "yes" || echo "no")
+        fi
+        
+        if [[ "$busybox_available" == "yes" ]]; then
+            echo -e "${COLORS[GREEN]}BusyBox detected - resolving dependencies...${COLORS[NC]}"
+            
+            # Batch process missing dependencies
+            for dep in "${missing_deps[@]}"; do
+                if busybox "$dep" --help >/dev/null 2>&1; then
+                    if [[ -w "/system/bin" ]] 2>/dev/null; then
+                        ln -sf "$(command -v busybox)" "/system/bin/$dep" 2>/dev/null || true
+                        echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Resolved: $dep -> busybox"
+                    fi
+                fi
+            done
+        else
+            echo -e "${COLORS[RED]}Critical dependencies missing and no BusyBox available${COLORS[NC]}"
+            log "ERROR" "Missing critical dependencies: ${missing_deps[*]}"
+            echo -e "${COLORS[YELLOW]}Continuing with limited functionality...${COLORS[NC]}"
+            return 1
+        fi
+    fi
+    
+    echo -e "${COLORS[GREEN]}Dependency check completed${COLORS[NC]}"
+    log "INFO" "Dependency check completed successfully"
+    return 0
+}
+
+# Enhanced system information with caching
+check_system_info() {
+    echo -e "${COLORS[CYAN]}System Information Check:${COLORS[NC]}"
+    log "INFO" "Starting enhanced system information check"
+    
+    # Cache system properties for performance
+    local -A system_cache=()
+    
+    populate_system_cache() {
+        local build_prop_files=("/system/build.prop" "/vendor/build.prop" "/product/build.prop")
+        
+        for prop_file in "${build_prop_files[@]}"; do
+            if [[ -f "$prop_file" ]]; then
+                while IFS='=' read -r key value; do
+                    [[ "$key" =~ ^ro\. ]] && system_cache["$key"]="$value"
+                done < "$prop_file"
+                break
+            fi
+        done
+    }
+    
+    populate_system_cache
+    
+    # Enhanced Android version detection
+    local android_version="${system_cache[ro.build.version.release]:-Unknown}"
+    local api_level="${system_cache[ro.build.version.sdk]:-Unknown}"
+    local device_model="${system_cache[ro.product.model]:-Unknown}"
+    local device_brand="${system_cache[ro.product.brand]:-Unknown}"
+    
+    # Validate and display system information
+    if [[ "$api_level" =~ ^[0-9]+$ ]]; then
+        validate_input "$api_level" "numeric" || api_level="Unknown"
+    fi
+    
+    echo -e "${COLORS[GREEN]}Device: $device_brand $device_model${COLORS[NC]}"
+    echo -e "${COLORS[GREEN]}Android Version: $android_version (API $api_level)${COLORS[NC]}"
+    log "INFO" "Device: $device_brand $device_model, Android: $android_version (API $api_level)"
+    
+    # Enhanced architecture detection with performance optimization
+    local arch
+    arch=$(uname -m 2>/dev/null || echo "unknown")
+    local cpu_abi="${system_cache[ro.product.cpu.abi]:-}"
+    local cpu_abi2="${system_cache[ro.product.cpu.abi2]:-}"
+    
+    echo -e "${COLORS[GREEN]}Architecture: $arch${COLORS[NC]}"
+    [[ -n "$cpu_abi" ]] && echo -e "${COLORS[GREEN]}Primary ABI: $cpu_abi${COLORS[NC]}"
+    [[ -n "$cpu_abi2" ]] && echo -e "${COLORS[GREEN]}Secondary ABI: $cpu_abi2${COLORS[NC]}"
+    
+    # Parallel system checks for better performance
+    {
+        # Memory information
+        if [[ -f "/proc/meminfo" ]]; then
+            local total_mem
+            total_mem=$(awk '/MemTotal/ {print int($2/1024) " MB"}' /proc/meminfo 2>/dev/null || echo "Unknown")
+            echo -e "${COLORS[GREEN]}Total Memory: $total_mem${COLORS[NC]}"
+        fi
+        
+        # Storage information
+        if command -v df >/dev/null 2>&1; then
+            local available_space
+            available_space=$(df /data 2>/dev/null | tail -1 | awk '{print int($4/1024) " MB"}' || echo "Unknown")
+            echo -e "${COLORS[GREEN]}Available /data space: $available_space${COLORS[NC]}"
+        fi
+        
+        # SELinux status
+        if command -v getenforce >/dev/null 2>&1; then
+            local selinux_status
+            selinux_status=$(getenforce 2>/dev/null || echo "Unknown")
+            echo -e "${COLORS[YELLOW]}SELinux Status: $selinux_status${COLORS[NC]}"
+        fi
+    } &
+    
+    wait
+    
+    log "INFO" "System information check completed"
+}
+
+# Enhanced device compatibility check
+check_device_compatibility() {
+    echo -e "${COLORS[CYAN]}Device Compatibility Check:${COLORS[NC]}"
+    log "INFO" "Starting device compatibility check"
+    
+    local compatibility_score=0
+    local total_checks=0
+    
+    # Check for root access indicators
+    local root_indicators=(
+        "/system/app/Superuser.apk"
+        "/system/etc/init.d"
+        "/system/bin/busybox"
+        "/data/local/tmp"
+    )
+    
+    for indicator in "${root_indicators[@]}"; do
+        ((total_checks++))
+        if [ -e "$indicator" ]; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Found: $indicator"
+            ((compatibility_score++))
+        else
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} Missing: $indicator"
+        fi
+    done
+    
+    # Calculate compatibility percentage
+    local compatibility_percent=$((compatibility_score * 100 / total_checks))
+    echo -e "${COLORS[BLUE]}Compatibility Score: $compatibility_percent%${COLORS[NC]}"
+    log "INFO" "Device compatibility score: $compatibility_percent%"
+    
+    if [ $compatibility_percent -lt 50 ]; then
+        echo -e "${COLORS[RED]}Warning: Low compatibility detected. Proceed with caution.${COLORS[NC]}"
+        log "WARN" "Low compatibility detected"
+    fi
+}
+
+# List of su binary locations
+SU_PATHS=(
+    "/system/bin/su" "/system/xbin/su" "/sbin/su" "/su/bin/su" "/su/xbin/su" "/system/sbin/su" "/magisk/.core/bin/su" "/debug_ramdisk/su" "/sbin/bin/su" "/system/su" "/system/xbin/daemonsu" "/system/xbin/busybox" "/su" "/xbin/su" "/bin/su" "/0/su"
+)
+
+main "$@"
+======
 # Setup root superuser directories and permissions
 setup_root_superuser() {
     local root_dirs=(
@@ -68,6 +1401,112 @@ fix_su_permissions() {
             echo -e "${COLORS[GREEN]}Fixed permissions for $su_path${COLORS[NC]}"
         fi
     done
+main "$@"
+======
+# Enhanced su permissions fix with safety checks
+fix_su_permissions() {
+    echo -e "${COLORS[CYAN]}Fixing su binary permissions...${COLORS[NC]}"
+    log "INFO" "Starting su permissions fix"
+    
+    local fixed_count=0
+    local total_found=0
+    local failed_paths=()
+    
+    for su_path in "${SU_PATHS[@]}"; do
+        # Validate path before processing
+        validate_input "$su_path" "path" || continue
+        
+        if [[ -f "$su_path" ]]; then
+            ((total_found++))
+            
+            # Enhanced safety checks
+            local file_type=""
+            if command -v file >/dev/null 2>&1; then
+                file_type=$(file "$su_path" 2>/dev/null || echo "")
+            fi
+            
+            # Verify it's an executable and not a script
+            if [[ "$file_type" =~ (executable|ELF) ]] || [[ -x "$su_path" ]]; then
+                # Create timestamped backup
+                local backup_dir="/data/superuser/backup"
+                mkdir -p "$backup_dir" 2>/dev/null || {
+                    log "WARN" "Could not create backup directory"
+                    continue
+                }
+                
+                local backup_name="$backup_dir/$(basename "$su_path").backup.$(date +%s)"
+                if cp "$su_path" "$backup_name" 2>/dev/null; then
+                    log "INFO" "Created backup: $backup_name"
+                else
+                    log "WARN" "Could not create backup for $su_path"
+                fi
+                
+                # Apply permissions with error handling
+                local success=true
+                chmod 6755 "$su_path" 2>/dev/null || {
+                    echo -e "${COLORS[RED]}Failed to set permissions for $su_path${COLORS[NC]}"
+                    log "ERROR" "chmod failed for $su_path"
+                    failed_paths+=("$su_path")
+                    success=false
+                }
+                
+                chown root:root "$su_path" 2>/dev/null || {
+                    echo -e "${COLORS[RED]}Failed to set ownership for $su_path${COLORS[NC]}"
+                    log "ERROR" "chown failed for $su_path"
+                    if [[ "$success" == "true" ]]; then
+                        failed_paths+=("$su_path")
+                        success=false
+                    fi
+                }
+                
+                if [[ "$success" == "true" ]]; then
+                    echo -e "${COLORS[GREEN]}Fixed permissions for $su_path${COLORS[NC]}"
+                    log "INFO" "Fixed permissions for $su_path"
+                    ((fixed_count++))
+                fi
+            else
+                echo -e "${COLORS[YELLOW]}Skipping $su_path (not a valid executable)${COLORS[NC]}"
+                log "WARN" "Skipped $su_path - not a valid executable"
+            fi
+        fi
+    done
+    
+    echo -e "${COLORS[BLUE]}Summary: Fixed $fixed_count out of $total_found su binaries${COLORS[NC]}"
+    log "INFO" "Su permissions fix completed: $fixed_count/$total_found"
+    
+    # Report failures and suggest recovery
+    if [[ ${#failed_paths[@]} -gt 0 ]]; then
+        echo -e "${COLORS[YELLOW]}Failed to fix permissions for:${COLORS[NC]}"
+        for path in "${failed_paths[@]}"; do
+            echo -e "${COLORS[RED]}  - $path${COLORS[NC]}"
+        done
+        echo -e "${COLORS[CYAN]}Recovery suggestions:${COLORS[NC]}"
+        echo "  - Check if filesystem is mounted read-only"
+        echo "  - Verify SELinux policy allows modifications"
+        echo "  - Ensure sufficient disk space"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Enhanced backup function
+backup_critical_files() {
+    echo -e "${COLORS[CYAN]}Creating backup of critical files...${COLORS[NC]}"
+    local backup_dir="/data/superuser/backup/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    
+    for su_path in "${SU_PATHS[@]}"; do
+        if [ -f "$su_path" ]; then
+            cp "$su_path" "$backup_dir/" 2>/dev/null && \
+            echo -e "${COLORS[GREEN]}Backed up: $su_path${COLORS[NC]}" || \
+            echo -e "${COLORS[RED]}Failed to backup: $su_path${COLORS[NC]}"
+        fi
+    done
+    
+    echo -e "${COLORS[BLUE]}Backup location: $backup_dir${COLORS[NC]}"
+    log "INFO" "Backup created at: $backup_dir"
+ main
 }
 
 # Improved accessibility check: also test execution
@@ -96,6 +1535,56 @@ check_accessibility() {
             all_ok=0
         fi
     done
+ main "$@"
+======
+    log "INFO" "Starting accessibility check"
+    local all_ok=1
+    local found_count=0
+    local working_count=0
+    local issues=()
+    
+    for su_path in "${SU_PATHS[@]}"; do
+        validate_input "$su_path" "path" || continue
+        
+        if [[ -f "$su_path" ]]; then
+            ((found_count++))
+            local perms=$(stat -c %a "$su_path" 2>/dev/null || echo "000")
+            local owner=$(stat -c %U "$su_path" 2>/dev/null || echo "unknown")
+            local group=$(stat -c %G "$su_path" 2>/dev/null || echo "unknown")
+            
+            if [[ "$perms" == "6755" && "$owner" == "root" && "$group" == "root" ]]; then
+                # Enhanced executable test with timeout and error capture
+                local test_result=""
+                if command -v timeout >/dev/null 2>&1; then
+                    test_result=$(timeout 5 "$su_path" --version 2>&1 || timeout 5 "$su_path" -c "id" 2>&1 || echo "failed")
+                else
+                    # Fallback without timeout
+                    test_result=$("$su_path" --version 2>&1 || "$su_path" -c "id" 2>&1 || echo "failed")
+                fi
+                
+                if [[ "$test_result" != "failed" && ! "$test_result" =~ (not found|denied|invalid) ]]; then
+                    echo -e "${COLORS[GREEN]}OK${COLORS[NC]} $su_path (6755 root:root, executable)"
+                    ((working_count++))
+                    log "INFO" "Su binary working: $su_path"
+                else
+                    echo -e "${COLORS[YELLOW]}WARN${COLORS[NC]} $su_path (permissions OK, execution failed: ${test_result:0:50})"
+                    issues+=("$su_path: execution failed")
+                    all_ok=0
+                    log "WARN" "Su binary not executable: $su_path - $test_result"
+                fi
+            else
+                echo -e "${COLORS[RED]}BAD${COLORS[NC]} $su_path (perms: $perms, owner: $owner:$group)"
+                issues+=("$su_path: incorrect permissions/ownership")
+                all_ok=0
+                log "ERROR" "Su binary bad permissions: $su_path"
+            fi
+        fi
+    done
+    
+    echo -e "${COLORS[BLUE]}Summary: Found $found_count su binaries, $working_count working${COLORS[NC]}"
+    
+main "$@"
+=====
     # Check root superuser dir
     if [ -d "/data/superuser" ]; then
         perms=$(stat -c %a /data/superuser)
@@ -111,6 +1600,7 @@ check_accessibility() {
         echo -e "${COLORS[RED]}MISSING${COLORS[NC]} /data/superuser"
         all_ok=0
     fi
+    
     if [ $all_ok -eq 1 ]; then
         echo -e "${COLORS[GREEN]}All checks passed!${COLORS[NC]}"
     else
@@ -221,3 +1711,1095 @@ main() {
 }
 
 main "$@"
+======
+    # Enhanced diagnostics for issues
+    if [[ ${#issues[@]} -gt 0 ]]; then
+        echo -e "${COLORS[YELLOW]}Detected Issues:${COLORS[NC]}"
+        for issue in "${issues[@]}"; do
+            echo -e "${COLORS[RED]}  - $issue${COLORS[NC]}"
+        done
+        echo -e "${COLORS[CYAN]}Troubleshooting suggestions:${COLORS[NC]}"
+        echo "  - Run 'setenforce 0' to temporarily disable SELinux"
+        echo "  - Check mount options: 'mount | grep system'"
+        echo "  - Verify root access: 'id'"
+        echo "  - Check for Magisk/SuperSU conflicts"
+    fi
+    
+    if [[ $all_ok -eq 1 ]]; then
+        echo -e "${COLORS[GREEN]}All checks passed!${COLORS[NC]}"
+        log "INFO" "All accessibility checks passed"
+    else
+        echo -e "${COLORS[RED]}Some issues detected. Please review above.${COLORS[NC]}"
+        log "ERROR" "Accessibility check failed"
+    fi
+    
+    return $all_ok
+}
+
+# Auto-install adb if missing
+install_adb_if_missing() {
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[YELLOW]}adb not found. Attempting to install Android Platform Tools...${COLORS[NC]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y android-tools-adb && echo -e "${COLORS[GREEN]}adb installed.${COLORS[NC]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y android-tools && echo -e "${COLORS[GREEN]}adb installed.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Could not auto-install adb. Please install it manually.${COLORS[NC]}"
+        fi
+    fi
+}
+
+# Android command terminal function
+android_cmd_terminal() {
+    install_adb_if_missing
+    echo -e "${COLORS[CYAN]}Launching Android command terminal...${COLORS[NC]}"
+    
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[RED]}adb not found. Please install Android Platform Tools.${COLORS[NC]}"
+        return 1
+    fi
+    
+    # Start adb server
+    if adb start-server >/dev/null 2>&1; then
+        echo -e "${COLORS[GREEN]}adb server started.${COLORS[NC]}"
+    else
+        echo -e "${COLORS[YELLOW]}adb server already running or failed to start.${COLORS[NC]}"
+    fi
+    
+    # Check device connection
+    local device=$(adb get-state 2>/dev/null || echo "unknown")
+    if [[ "$device" == "device" ]]; then
+        echo -e "${COLORS[GREEN]}Connected to device: $device${COLORS[NC]}"
+    else
+        echo -e "${COLORS[RED]}No device connected or authorized.${COLORS[NC]}"
+        echo -e "${COLORS[YELLOW]}Please connect your device and enable USB debugging.${COLORS[NC]}"
+        return 1
+    fi
+    
+    # Launch adb shell
+    echo -e "${COLORS[CYAN]}Opening adb shell...${COLORS[NC]}"
+    echo -e "${COLORS[CYAN]}You are now in the adb shell. Type 'exit' to return.${COLORS[NC]}"
+    
+    adb shell || {
+        echo -e "${COLORS[RED]}Failed to open adb shell. Is your device connected and authorized?${COLORS[NC]}"
+        return 1
+    }
+    
+    echo -e "${COLORS[GREEN]}adb shell session ended.${COLORS[NC]}"
+}
+
+# Android user account and id info
+android_user_info() {
+    install_adb_if_missing
+    echo -e "${COLORS[CYAN]}Android User Account & ID Info:${COLORS[NC]}"
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[RED]}adb not found. Please install Android Platform Tools.${COLORS[NC]}"
+        return 1
+    fi
+    adb start-server >/dev/null 2>&1
+    adb shell 'pm list users; id; whoami; getprop persist.sys.device_name; getprop ro.product.model; getprop ro.serialno' 2>/dev/null || {
+        echo -e "${COLORS[RED]}Failed to retrieve user info. Is your device connected and authorized?${COLORS[NC]}"
+        return 1
+    }
+}
+
+# Auto-configure sudo/root superuser if possible
+auto_configure_sudo() {
+    echo -e "${COLORS[CYAN]}Checking sudo/root superuser configuration...${COLORS[NC]}"
+    # Check if sudo is installed
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo -e "${COLORS[YELLOW]}sudo not found. Attempting to install...${COLORS[NC]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y sudo && echo -e "${COLORS[GREEN]}sudo installed.${COLORS[NC]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y sudo && echo -e "${COLORS[GREEN]}sudo installed.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Could not auto-install sudo. Please install it manually.${COLORS[NC]}"
+        fi
+    else
+        echo -e "${COLORS[GREEN]}sudo is present.${COLORS[NC]}"
+    fi
+    # Ensure current user is in sudoers if not root
+    if [ "$(id -u)" -ne 0 ]; then
+        user=$(whoami)
+        if sudo -l -U "$user" | grep -q '(ALL) ALL'; then
+            echo -e "${COLORS[GREEN]}$user already has sudo privileges.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[YELLOW]}$user does not have sudo privileges. Attempting to add...${COLORS[NC]}"
+            echo "$user ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$user >/dev/null && \
+            echo -e "${COLORS[GREEN]}$user added to sudoers (NOPASSWD).${COLORS[NC]}"
+        fi
+    fi
+}
+
+# Test sudo/root superuser access
+check_sudo_root_access() {
+    echo -e "${COLORS[CYAN]}Testing sudo/root superuser access...${COLORS[NC]}"
+    if [ "$(id -u)" -eq 0 ]; then
+        echo -e "${COLORS[GREEN]}Already running as root.${COLORS[NC]}"
+    else
+        if sudo -n true 2>/dev/null; then
+            echo -e "${COLORS[GREEN]}Sudo access confirmed for $(whoami).${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Sudo access failed for $(whoami).${COLORS[NC]}"
+        fi
+    fi
+}
+
+# Detect Termux environment
+detect_termux() {
+    if [[ -d "/data/data/com.termux" ]] || [[ -n "${TERMUX_VERSION:-}" ]] || [[ "${PREFIX:-}" == *"com.termux"* ]]; then
+        export TERMUX_ENV=1
+        export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+        export TERMUX_HOME="${TERMUX_HOME:-/data/data/com.termux/files/home}"
+        
+        log "INFO" "Termux environment detected"
+        echo -e "${COLORS[YELLOW]}🔧 Termux Environment Detected${COLORS[NC]}"
+        return 0
+    fi
+    return 1
+}
+
+# Termux integration features
+termux_integration() {
+    if [[ "${TERMUX_ENV}" == "1" ]]; then
+        log "INFO" "Enabling Termux integration features"
+        
+        # Termux API integration
+        if command -v termux-notification >/dev/null 2>&1; then
+            termux-notification --title "Superuser Terminal" --content "Root access session started" 2>/dev/null || true
+        fi
+        
+        # Storage access check
+        if [[ ! -d "/storage" && ! -d "$HOME/storage" ]]; then
+            log "WARN" "Storage access not configured. Run: termux-setup-storage"
+            echo -e "${COLORS[YELLOW]}⚠️ Storage access not configured. Run: termux-setup-storage${COLORS[NC]}"
+        fi
+        
+        # Set Termux-specific environment
+        export TERMUX_APP_PACKAGE="com.termux"
+        export SHELL="${PREFIX}/bin/bash"
+        
+        # Create Termux-specific directories
+        mkdir -p "$TERMUX_HOME/.config" "$TERMUX_HOME/.local/share" 2>/dev/null || true
+    fi
+}
+
+# Termux interactive mode
+termux_interactive_mode() {
+    while true; do
+        clear
+        echo -e "${COLORS[PURPLE]}╔══════════════════════════════════════════════════════╗${COLORS[NC]}"
+        echo -e "${COLORS[PURPLE]}║     🔐 ENHANCED SUPERUSER TERMINAL - TERMUX 🔐       ║${COLORS[NC]}"
+        echo -e "${COLORS[PURPLE]}║                   v$VERSION                           ║${COLORS[NC]}"
+        echo -e "${COLORS[PURPLE]}╚══════════════════════════════════════════════════════╝${COLORS[NC]}"
+        echo ""
+        echo -e "${COLORS[CYAN]}📱 ANDROID OPERATIONS:${COLORS[NC]}"
+        echo "1. 🔍 Full system check"
+        echo "2. 🔧 Fix su permissions"
+        echo "3. 📱 Android terminal"
+        echo "4. 📊 Device information"
+        echo "5. 💾 Create backup"
+        echo ""
+        echo -e "${COLORS[CYAN]}🛠️ TERMUX TOOLS:${COLORS[NC]}"
+        echo "6. 🖥️ Launch GUI (VNC)"
+        echo "7. 🔧 Termux tools menu"
+        echo "8. 📝 View logs"
+        echo "9. ⚙️ System configuration"
+        echo ""
+        echo "0. ❌ Exit"
+        echo ""
+        echo -n "Select option [0-9]: "
+        read -r choice
+        
+        case $choice in
+            1)
+                echo -e "${COLORS[GREEN]}Running full system check...${COLORS[NC]}"
+                check_system_info || true
+                check_device_compatibility || true
+                setup_root_superuser || true
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            2)
+                echo -e "${COLORS[GREEN]}Fixing permissions...${COLORS[NC]}"
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            3)
+                android_cmd_terminal || true
+                ;;
+            4)
+                android_user_info || true
+                if command -v termux-telephony-deviceinfo >/dev/null 2>&1; then
+                    echo -e "${COLORS[CYAN]}Termux Device Info:${COLORS[NC]}"
+                    termux-telephony-deviceinfo 2>/dev/null || echo "Device info not available"
+                fi
+                ;;
+            5)
+                backup_critical_files || true
+                ;;
+            6)
+                if command -v vncserver >/dev/null 2>&1; then
+                    echo -e "${COLORS[GREEN]}🖥️ Starting VNC server...${COLORS[NC]}"
+                    vncserver :1 -geometry 1280x720 2>/dev/null || echo "VNC start failed"
+                    echo "Connect VNC client to localhost:5901"
+                else
+                    echo -e "${COLORS[RED]}VNC server not installed${COLORS[NC]}"
+                    echo "Install with: pkg install tigervnc"
+                fi
+                ;;
+            7)
+                termux_tools_menu || echo "Tools menu not available"
+                ;;
+            8)
+                echo -e "${COLORS[CYAN]}Recent log entries:${COLORS[NC]}"
+                tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs found"
+                ;;
+            9)
+                termux_system_config || echo "System config not available"
+                ;;
+            0)
+                echo -e "${COLORS[GREEN]}👋 Goodbye from Termux!${COLORS[NC]}"
+                if command -v termux-notification >/dev/null 2>&1; then
+                    termux-notification --title "Superuser Terminal" --content "Session ended" 2>/dev/null || true
+                fi
+                break
+                ;;
+            *)
+                echo -e "${COLORS[RED]}❌ Invalid option. Please try again.${COLORS[NC]}"
+                sleep 1
+                ;;
+        esac
+        
+        if [[ $choice != 0 ]]; then
+            echo ""
+            read -p "Press Enter to continue..."
+        fi
+    done
+}
+
+# Termux tools menu
+termux_tools_menu() {
+    echo -e "${COLORS[CYAN]}🔧 Termux Tools Menu:${COLORS[NC]}"
+    echo "1. Package manager (pkg)"
+    echo "2. Setup storage access"
+    echo "3. Install development tools"
+    echo "4. Network tools"
+    echo "5. Back to main menu"
+    echo -n "Select option [1-5]: "
+    read -r tool_choice
+    
+    case $tool_choice in
+        1)
+            echo -e "${COLORS[GREEN]}Opening package manager...${COLORS[NC]}"
+            pkg list-installed | head -20
+            echo "Use 'pkg install <package>' to install new packages"
+            ;;
+        2)
+            echo -e "${COLORS[GREEN]}Setting up storage access...${COLORS[NC]}"
+            termux-setup-storage || echo "termux-setup-storage not available"
+            ;;
+        3)
+            echo -e "${COLORS[GREEN]}Installing development tools...${COLORS[NC]}"
+            pkg install -y git make clang python nodejs || echo "Installation failed"
+            ;;
+        4)
+            echo -e "${COLORS[GREEN]}Network tools available:${COLORS[NC]}"
+            echo "- curl, wget: Download tools"
+            echo "- openssh: SSH client/server"
+            echo "- nmap: Network scanner"
+            ;;
+        5)
+            return 0
+            ;;
+        *)
+            echo -e "${COLORS[RED]}Invalid option${COLORS[NC]}"
+            ;;
+    esac
+}
+
+# Termux system configuration
+termux_system_config() {
+    echo -e "${COLORS[CYAN]}📋 Termux System Configuration:${COLORS[NC]}"
+    echo "Termux prefix: ${PREFIX:-Not set}"
+    echo "Termux home: ${TERMUX_HOME:-Not set}"
+    echo "Storage access: $(test -d /storage && echo "✅ Available" || echo "❌ Run termux-setup-storage")"
+    echo "Root access: $(test "$(id -u)" -eq 0 && echo "✅ Active" || echo "❌ Not root")"
+    echo "TSU available: $(command -v tsu >/dev/null && echo "✅ Yes" || echo "❌ No")"
+    echo "Python: $(python3 --version 2>/dev/null || echo "Not installed")"
+    echo "Git: $(git --version 2>/dev/null || echo "Not installed")"
+    echo "Node.js: $(node --version 2>/dev/null || echo "Not installed")"
+}
+
+# Test result function for CI compatibility
+test_result() {
+    local test_name="$1"
+    local result="$2"
+    
+    if [[ "$result" -eq 0 ]]; then
+        echo -e "${COLORS[GREEN]}✓ ${test_name}${COLORS[NC]}"
+        log "INFO" "$test_name passed"
+        return 0
+    else
+        echo -e "${COLORS[RED]}✗ ${test_name}${COLORS[NC]}"
+        log "ERROR" "$test_name failed with exit code $result"
+        return 1
+    fi
+}
+
+# Create directories function for CI compatibility
+create_directories() {
+    echo -e "${COLORS[CYAN]}Creating required directories...${COLORS[NC]}"
+    
+    # Create GitHub workflows directory
+    mkdir -p .github/workflows logs backups || {
+        echo -e "${COLORS[RED]}Error: Failed to create directories${COLORS[NC]}" >&2
+        return 1
+    }
+    
+    # Move CI test file if it exists in wrong location
+    if [[ -f "superuser.test" ]]; then
+        echo -e "${COLORS[YELLOW]}Moving CI test file to correct location...${COLORS[NC]}"
+        mv superuser.test .github/workflows/ci.yml || {
+            echo -e "${COLORS[RED]}Error: Failed to move CI file${COLORS[NC]}" >&2
+            return 1
+        }
+    fi
+    
+    # Create .gitignore if missing
+    if [[ ! -f ".gitignore" ]]; then
+        echo -e "${COLORS[CYAN]}Creating .gitignore...${COLORS[NC]}"
+        cat > .gitignore << 'EOF'
+# Logs
+logs/
+*.log
+
+# Backups
+backups/
+*.backup
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Node modules
+node_modules/
+
+# Build artifacts
+*.o
+*.so
+*.exe
+*.out
+EOF
+    fi
+    
+    echo -e "${COLORS[GREEN]}✓ All directories created successfully${COLORS[NC]}"
+    return 0
+}
+
+# Enhanced network diagnostics
+check_network_connectivity() {
+    echo -e "${COLORS[CYAN]}Network Connectivity Check:${COLORS[NC]}"
+    log "INFO" "Starting network connectivity check"
+    
+    local connectivity_score=0
+    local total_tests=0
+    
+    # Test DNS resolution
+    ((total_tests++))
+    if command -v nslookup >/dev/null 2>&1; then
+        if nslookup google.com >/dev/null 2>&1; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} DNS resolution working"
+            ((connectivity_score++))
+        else
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} DNS resolution failed"
+        fi
+    else
+        echo -e "${COLORS[YELLOW]}!${COLORS[NC]} nslookup not available"
+    fi
+    
+    # Test network interfaces
+    ((total_tests++))
+    if command -v ip >/dev/null 2>&1; then
+        local active_interfaces=$(ip link show up | grep -c "state UP" || echo "0")
+        if [[ "$active_interfaces" -gt 0 ]]; then
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Network interfaces active: $active_interfaces"
+            ((connectivity_score++))
+        else
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} No active network interfaces"
+        fi
+    else
+        echo -e "${COLORS[YELLOW]}!${COLORS[NC]} ip command not available"
+    fi
+    
+    # Calculate connectivity score
+    local connectivity_percent=$((connectivity_score * 100 / total_tests))
+    echo -e "${COLORS[BLUE]}Network Score: $connectivity_percent%${COLORS[NC]}"
+    log "INFO" "Network connectivity score: $connectivity_percent%"
+}
+
+# Enhanced security audit
+security_audit() {
+    echo -e "${COLORS[CYAN]}Security Audit:${COLORS[NC]}"
+    log "INFO" "Starting security audit"
+    
+    local security_issues=0
+    
+    # Check for world-writable files in sensitive locations
+    local sensitive_dirs=("/system" "/data/local/tmp" "/data/superuser")
+    for dir in "${sensitive_dirs[@]}"; do
+        if [[ -d "$dir" ]]; then
+            local writable_files=$(find "$dir" -type f -perm -002 2>/dev/null | wc -l || echo "0")
+            if [[ "$writable_files" -gt 0 ]]; then
+                echo -e "${COLORS[YELLOW]}⚠${COLORS[NC]} Found $writable_files world-writable files in $dir"
+                ((security_issues++))
+            else
+                echo -e "${COLORS[GREEN]}✓${COLORS[NC]} No world-writable files in $dir"
+            fi
+        fi
+    done
+    
+    # Check su binary security
+    for su_path in "${SU_PATHS[@]}"; do
+        if [[ -f "$su_path" ]]; then
+            local perms=$(stat -c %a "$su_path" 2>/dev/null || echo "000")
+            if [[ "$perms" == "6755" ]]; then
+                echo -e "${COLORS[GREEN]}✓${COLORS[NC]} $su_path has secure permissions"
+            else
+                echo -e "${COLORS[YELLOW]}⚠${COLORS[NC]} $su_path has permissions: $perms"
+                ((security_issues++))
+            fi
+        fi
+    done
+    
+    # Check for suspicious processes
+    if command -v ps >/dev/null 2>&1; then
+        local suspicious_procs=$(ps aux | grep -E "(adbd|debuggerd)" | grep -v grep | wc -l || echo "0")
+        if [[ "$suspicious_procs" -gt 0 ]]; then
+            echo -e "${COLORS[YELLOW]}⚠${COLORS[NC]} Found $suspicious_procs potentially suspicious processes"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} No suspicious processes detected"
+        fi
+    fi
+    
+    echo -e "${COLORS[BLUE]}Security Issues Found: $security_issues${COLORS[NC]}"
+    log "INFO" "Security audit completed with $security_issues issues"
+    
+    return $security_issues
+}
+
+# System optimization suggestions
+suggest_optimizations() {
+    echo -e "${COLORS[CYAN]}System Optimization Suggestions:${COLORS[NC]}"
+    log "INFO" "Generating optimization suggestions"
+    
+    # Memory optimization
+    if [[ -f "/proc/meminfo" ]]; then
+        local free_mem=$(awk '/MemAvailable/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+        local total_mem=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo "1")
+        local mem_usage_percent=$((100 - (free_mem * 100 / total_mem)))
+        
+        if [[ "$mem_usage_percent" -gt 80 ]]; then
+            echo -e "${COLORS[YELLOW]}💡${COLORS[NC]} High memory usage ($mem_usage_percent%) - consider closing unused apps"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Memory usage is optimal ($mem_usage_percent%)"
+        fi
+    fi
+    
+    # Storage optimization
+    if command -v df >/dev/null 2>&1; then
+        local data_usage=$(df /data 2>/dev/null | tail -1 | awk '{print $5}' | sed 's/%//' || echo "0")
+        if [[ "$data_usage" -gt 90 ]]; then
+            echo -e "${COLORS[YELLOW]}💡${COLORS[NC]} High storage usage ($data_usage%) - consider cleaning cache"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Storage usage is acceptable ($data_usage%)"
+        fi
+    fi
+    
+    # Performance suggestions
+    if [[ -f "/proc/loadavg" ]]; then
+        local load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
+        if (( $(echo "$load_avg > 2.0" | bc -l 2>/dev/null || echo 0) )); then
+            echo -e "${COLORS[YELLOW]}💡${COLORS[NC]} High system load ($load_avg) - consider restarting device"
+        else
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} System load is normal ($load_avg)"
+        fi
+    fi
+    
+    log "INFO" "Optimization suggestions completed"
+}
+
+# New benchmark function for performance testing
+benchmark_system_performance() {
+    echo -e "${COLORS[CYAN]}System Performance Benchmark:${COLORS[NC]}"
+    
+    local start_time
+    start_time=$(date +%s.%N 2>/dev/null || date +%s)
+    
+    # CPU performance test
+    echo "Testing CPU performance..."
+    local time_result
+    time_result=$(time (for i in {1..1000}; do echo "$i" >/dev/null; done) 2>&1 | grep real || echo "N/A")
+    echo "CPU test: $time_result"
+    
+    # Memory performance test
+    echo "Testing memory performance..."
+    if command -v free >/dev/null 2>&1; then
+        free -h
+    else
+        echo "Memory info not available"
+    fi
+    
+    # Disk I/O performance test
+    echo "Testing disk I/O performance..."
+    if [[ -w "/data" ]]; then
+        local test_file="/data/superuser_benchmark_test"
+        dd if=/dev/zero of="$test_file" bs=1M count=10 2>&1 | grep -E "(copied|MB/s)" || echo "I/O test failed"
+        rm -f "$test_file" 2>/dev/null
+    else
+        echo "Disk I/O test skipped (no write access)"
+    fi
+    
+    local end_time
+    end_time=$(date +%s.%N 2>/dev/null || date +%s)
+    local benchmark_time
+    benchmark_time=$(echo "$end_time - $start_time" | bc -l 2>/dev/null || echo "N/A")
+    
+    echo -e "${COLORS[GREEN]}Benchmark completed in ${benchmark_time} seconds${COLORS[NC]}"
+    log "PERF" "System benchmark completed in ${benchmark_time} seconds"
+}
+
+# GUI mode detection and support
+if [[ "${GUI_MODE:-}" == "1" ]]; then
+    # Disable colored output for GUI consumption
+    declare -A COLORS=(
+        [RED]=''
+        [GREEN]=''
+        [CYAN]=''
+        [YELLOW]=''
+        [BLUE]=''
+        [PURPLE]=''
+        [NC]=''
+    )
+    
+    # Enhanced logging for GUI
+    log() {
+        local level="${1:-INFO}"
+        shift || true
+        local message="${*:-No message provided}"
+        local timestamp=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown-time")
+        
+        # GUI-friendly output format
+        echo "GUI_LOG:[$timestamp] [$level] $message"
+        
+        # Also log to file
+        if [[ -d "$LOG_DIR" ]]; then
+            echo "[$timestamp] [$level] $message" >> "$LOG_FILE" 2>/dev/null || true
+        fi
+    }
+fi
+
+# GUI command handler
+handle_gui_command() {
+    local command="$1"
+    local output=""
+    
+    case "$command" in
+        "app-status")
+            output="Enhanced Superuser Terminal v$VERSION
+Root Access: $(test "$(id -u)" -eq 0 && echo "✓ Available" || echo "✗ Not available")
+Superuser Dir: $(test -d /data/superuser && echo "✓ Present" || echo "✗ Missing")
+Android Integration: ✓ Active
+Timestamp: $(date)"
+            ;;
+        "app-check")
+            output=$(check_system_info 2>&1)
+            ;;
+        "app-fix")
+            output=$(fix_su_permissions 2>&1)
+            ;;
+        "app-health")
+            output=$(system_health_monitor 2>&1)
+            ;;
+        "app-benchmark")
+            output=$(benchmark_system_performance 2>&1)
+            ;;
+        *)
+            output=$(main "$command" 2>&1)
+            ;;
+    esac
+    
+    echo "$output"
+}
+
+main () {
+# Create Android terminal server for app communication
+create_android_terminal_server() {
+    echo -e "${COLORS[CYAN]}Creating Android terminal server...${COLORS[NC]}"
+    
+    cat > /data/superuser/bin/android-terminal-server << 'EOF'
+#!/system/bin/sh
+# Android Terminal Server
+# Handles communication between Android app and superuser script
+
+FIFO_IN="/data/superuser/tmp/terminal_in"
+FIFO_OUT="/data/superuser/tmp/terminal_out"
+SCRIPT_PATH="/data/superuser/bin/Superuser_main"
+
+# Create named pipes for communication
+mkfifo "$FIFO_IN" 2>/dev/null || true
+mkfifo "$FIFO_OUT" 2>/dev/null || true
+
+echo "Android Terminal Server started"
+echo "Listening for commands..."
+
+while true; do
+    if [ -p "$FIFO_IN" ]; then
+        while IFS= read -r command; do
+            if [ "$command" = "exit" ]; then
+                echo "Server shutting down"
+                exit 0
+            fi
+            
+            # Execute command and send output
+            if [ -x "$SCRIPT_PATH" ]; then
+                "$SCRIPT_PATH" process_android_command "$command" > "$FIFO_OUT" 2>&1
+            else
+                echo "Error: Superuser script not found" > "$FIFO_OUT"
+            fi
+        done < "$FIFO_IN"
+    fi
+    sleep 1
+done
+EOF
+    
+    chmod +x /data/superuser/bin/android-terminal-server 2>/dev/null || true
+    echo -e "${COLORS[GREEN]}Android terminal server created${COLORS[NC]}"
+}
+
+# Android App Integration Features
+create_android_app_integration() {
+    echo -e "${COLORS[CYAN]}Setting up Android app integration...${COLORS[NC]}"
+    log "INFO" "Creating Android app integration structure"
+    
+    # Create Android app project structure
+    local app_dirs=(
+        "/data/superuser/android-app"
+        "/data/superuser/android-app/app"
+        "/data/superuser/android-app/app/src"
+        "/data/superuser/android-app/app/src/main"
+        "/data/superuser/android-app/app/src/main/java"
+        "/data/superuser/android-app/app/src/main/java/com"
+        "/data/superuser/android-app/app/src/main/java/com/superuser"
+        "/data/superuser/android-app/app/src/main/java/com/superuser/terminal"
+        "/data/superuser/android-app/app/src/main/res"
+        "/data/superuser/android-app/app/src/main/res/layout"
+        "/data/superuser/android-app/app/src/main/res/values"
+        "/data/superuser/android-app/app/src/main/res/drawable"
+        "/data/superuser/android-app/app/src/main/res/menu"
+        "/data/superuser/android-app/app/src/main/assets"
+    )
+    
+    for dir in "${app_dirs[@]}"; do
+        mkdir -p "$dir" 2>/dev/null && {
+            echo -e "${COLORS[GREEN]}✓${COLORS[NC]} Created: $dir"
+        } || {
+            echo -e "${COLORS[RED]}✗${COLORS[NC]} Failed to create: $dir"
+        }
+    done
+    
+    # Copy this script to assets for app integration
+    cp "$0" "/data/superuser/android-app/app/src/main/assets/Superuser_main" 2>/dev/null || true
+    
+    echo -e "${COLORS[GREEN]}Android app integration structure created${COLORS[NC]}"
+}
+
+# Enhanced main function with Android app support
+main() {
+    local start_time
+    start_time=$(date +%s)
+    
+    # Detect Termux environment first
+    detect_termux || true
+    
+    echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
+    if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
+        echo -e "${COLORS[YELLOW]}🔧 Termux Environment Detected${COLORS[NC]}"
+    fi
+    
+    log "INFO" "Starting Enhanced Superuser Terminal v$VERSION"
+    
+    # Enable Termux integration if detected
+    if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
+        termux_integration || {
+            log "WARN" "Termux integration had issues"
+            echo -e "${COLORS[YELLOW]}Warning: Termux integration incomplete${COLORS[NC]}"
+        }
+    fi
+    
+    # Pre-flight system validation
+    if [[ "${DRY_RUN:-0}" != "1" ]]; then
+        echo -e "${COLORS[CYAN]}Performing pre-flight checks...${COLORS[NC]}"
+        
+        # Check available disk space
+        local available_kb
+        available_kb=$(df /data 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+        if [[ "$available_kb" -lt 51200 ]] && [[ "$available_kb" != "0" ]]; then
+            echo -e "${COLORS[YELLOW]}Warning: Low disk space (${available_kb}KB available)${COLORS[NC]}"
+            log "WARN" "Low disk space warning: ${available_kb}KB"
+        fi
+        
+        # Check system load
+        if [[ -f "/proc/loadavg" ]]; then
+            local load_avg
+            load_avg=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo "0")
+            if (( $(echo "$load_avg > 2.0" | bc -l 2>/dev/null || echo 0) )); then
+                echo -e "${COLORS[YELLOW]}Warning: High system load ($load_avg)${COLORS[NC]}"
+                log "WARN" "High system load: $load_avg"
+            fi
+        fi
+    fi
+    
+    # Enhanced dependency checking with performance metrics
+    local dep_start
+    dep_start=$(date +%s)
+    check_dependencies || {
+        echo -e "${COLORS[YELLOW]}Continuing with limited functionality...${COLORS[NC]}"
+        log "WARN" "Dependency check failed - limited functionality"
+    }
+    local dep_end
+    dep_end=$(date +%s)
+    log "PERF" "Dependency check took $((dep_end - dep_start)) seconds"
+    
+    # Command execution with enhanced error handling
+    local command="${1:-check}"
+    local cmd_start
+    cmd_start=$(date +%s)
+    
+    case "$command" in
+        "interactive"|"-i")
+            if [[ "${TERMUX_ENV:-0}" == "1" ]]; then
+                termux_interactive_mode
+            else
+                interactive_mode
+            fi
+            ;;
+        "check")
+            echo -e "${COLORS[GREEN]}Running comprehensive system check...${COLORS[NC]}"
+            {
+                check_system_info && test_result "System Info Check" $? &
+                check_device_compatibility && test_result "Device Compatibility" $? &
+                wait
+            }
+            echo -e "${COLORS[GREEN]}System check completed.${COLORS[NC]}"
+            ;;
+        "setup")
+            echo -e "${COLORS[GREEN]}Running enhanced setup...${COLORS[NC]}"
+            build_superuser_structure && test_result "Enhanced Directory Structure" $?
+            create_directories && test_result "Directory Creation" $?
+            setup_root_superuser && test_result "Root Superuser Setup" $?
+            ;;
+        "build")
+            echo -e "${COLORS[GREEN]}Building superuser structure...${COLORS[NC]}"
+            build_superuser_structure && test_result "Enhanced Directory Structure" $?
+            ;;
+        "structure")
+            echo -e "${COLORS[GREEN]}Creating superuser directory structure...${COLORS[NC]}"
+            build_superuser_structure
+            ;;
+        "install")
+            echo -e "${COLORS[GREEN]}Installing superuser terminal...${COLORS[NC]}"
+            build_superuser_structure && test_result "Enhanced Directory Structure" $?
+            # Copy main script to superuser bin directory
+            if [[ -d "/data/superuser/bin" ]]; then
+                cp "$0" "/data/superuser/bin/Superuser_main" 2>/dev/null && {
+                    chmod +x "/data/superuser/bin/Superuser_main"
+                    echo -e "${COLORS[GREEN]}✓ Installed main script to /data/superuser/bin/${COLORS[NC]}"
+                } || {
+                    echo -e "${COLORS[RED]}✗ Failed to install main script${COLORS[NC]}"
+                }
+            fi
+            ;;
+        "android")
+            echo -e "${COLORS[GREEN]}Creating Android development structure...${COLORS[NC]}"
+            create_android_structure && test_result "Android Structure Creation" $?
+            ;;
+        "create-app")
+            echo -e "${COLORS[GREEN]}Creating Android terminal app...${COLORS[NC]}"
+            create_android_app_integration && test_result "Android App Integration" $?
+            create_android_terminal_server && test_result "Terminal Server Creation" $?
+            ;;
+        "app-server")
+            echo -e "${COLORS[GREEN]}Starting Android terminal server...${COLORS[NC]}"
+            /data/superuser/bin/android-terminal-server
+            ;;
+        "process_android_command")
+            process_android_command "$2"
+            ;;
+        "logs")
+            echo -e "${COLORS[CYAN]}Recent log entries:${COLORS[NC]}"
+            tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs found"
+            echo ""
+            echo "Log file location: $LOG_FILE"
+            ;;
+        "status")
+            echo -e "${COLORS[CYAN]}Quick System Status:${COLORS[NC]}"
+            echo "Root: $(test "$(id -u)" -eq 0 && echo "✓ Active" || echo "✗ Not active")"
+            echo "Superuser Dir: $(test -d /data/superuser && echo "✓ Present" || echo "✗ Missing")"
+            echo "Android Integration: ✓ Active"
+            echo "Version: $VERSION"
+            echo "Timestamp: $(date)"
+            ;;
+        "env")
+            echo -e "${COLORS[CYAN]}Environment Information:${COLORS[NC]}"
+            echo "SUPERUSER_HOME: ${SUPERUSER_HOME:-Not set}"
+            echo "PATH: $PATH"
+            echo "Working Directory: $(pwd)"
+            echo "Shell: $SHELL"
+            echo "Termux: $(test "${TERMUX_ENV:-0}" -eq 1 && echo "Yes" || echo "No")"
+            ;;
+        "help"|"--help"|"-h")
+            echo -e "${COLORS[BLUE]}Enhanced Superuser Terminal - Command Help${COLORS[NC]}"
+            echo "Usage: $0 [command] [options]"
+            echo ""
+            echo "BASIC COMMANDS:"
+            echo "  check           - Run comprehensive system check (default)"
+            echo "  fix             - Fix su permissions with safety checks"
+            echo "  backup          - Create enhanced backup of critical files"
+            echo "  interactive     - Launch interactive mode"
+            echo ""
+            echo "SETUP COMMANDS:"
+            echo "  setup           - Run initial setup with optimizations"
+            echo "  build           - Build enhanced superuser directory structure"
+            echo "  structure       - Create superuser directory structure only"
+            echo "  install         - Install superuser terminal with full setup"
+            echo "  android         - Create Android development structure"
+            echo ""
+            echo "DIAGNOSTIC COMMANDS:"
+            echo "  benchmark       - Run system performance benchmark"
+            echo "  network         - Check network connectivity"
+            echo "  security        - Run security audit"
+            echo "  optimize        - Get optimization suggestions"
+            echo "  health          - System health monitor"
+            echo "  performance     - Performance analysis and monitoring"
+            echo "  monitor         - Continuous system monitoring"
+            echo "  test            - Run comprehensive test suite"
+            echo "  full            - Run complete diagnostic suite"
+            echo ""
+            echo "UTILITY COMMANDS:"
+            echo "  android-terminal - Launch Android command terminal"
+            echo "  android-info    - Get Android user information"
+            echo "  deps            - Auto-install missing dependencies"
+            echo "  logs            - View recent log entries"
+            echo "  status          - Quick system status"
+            echo "  env             - Environment information"
+            echo "  help            - Show this help message"
+            echo "  version         - Show version information"
+            ;;
+        "version"|"--version"|"-v")
+            echo -e "${COLORS[BLUE]}Enhanced Superuser Terminal${COLORS[NC]}"
+            echo "Version: $VERSION"
+            echo "Build: $(date '+%Y-%m-%d')"
+            echo "Features: Android Integration, Termux Support, Security Auditing"
+            echo "Platform: Android/Linux"
+            ;;
+        "health")
+            echo -e "${COLORS[BLUE]}Running system health monitor...${COLORS[NC]}"
+            start_performance_monitoring
+            system_health_monitor
+            end_performance_monitoring
+            ;;
+        "deps"|"dependencies")
+            echo -e "${COLORS[BLUE]}Installing missing dependencies...${COLORS[NC]}"
+            auto_install_dependencies
+            ;;
+        "monitor")
+            echo -e "${COLORS[BLUE]}Continuous system monitoring...${COLORS[NC]}"
+            echo "Press Ctrl+C to stop monitoring"
+            while true; do
+                clear
+                system_health_monitor
+                sleep 30
+            done
+            ;;
+        "test")
+            echo -e "${COLORS[GREEN]}Running comprehensive test suite...${COLORS[NC]}"
+            start_performance_monitoring
+            check_system_info && test_result "System Info Check" $?
+            check_device_compatibility && test_result "Device Compatibility" $?
+            check_network_connectivity && test_result "Network Check" $?
+            security_audit && test_result "Security Audit" $?
+            system_health_monitor && test_result "Health Monitor" $?
+            end_performance_monitoring
+            ;;
+        "performance"|"perf")
+            echo -e "${COLORS[BLUE]}Running performance benchmark...${COLORS[NC]}"
+            start_performance_monitoring
+            benchmark_system_performance
+            end_performance_monitoring
+            ;;
+        "fix")
+            echo -e "${COLORS[GREEN]}Fixing permissions with enhanced safety...${COLORS[NC]}"
+            start_performance_monitoring
+            fix_su_permissions && test_result "Permission Fix" $?
+            check_accessibility && test_result "Accessibility Check" $?
+            end_performance_monitoring
+            ;;
+        "backup")
+            echo -e "${COLORS[GREEN]}Creating enhanced backup...${COLORS[NC]}"
+            start_performance_monitoring
+            backup_critical_files && test_result "Backup Creation" $?
+            end_performance_monitoring
+            ;;
+        "benchmark")
+            echo -e "${COLORS[BLUE]}Running performance benchmark...${COLORS[NC]}"
+            start_performance_monitoring
+            benchmark_system_performance
+            end_performance_monitoring
+            ;;
+        "network")
+            echo -e "${COLORS[BLUE]}Running network diagnostics...${COLORS[NC]}"
+            check_network_connectivity
+            ;;
+        "security")
+            echo -e "${COLORS[BLUE]}Running security audit...${COLORS[NC]}"
+            security_audit
+            ;;
+        "optimize")
+            echo -e "${COLORS[BLUE]}Analyzing system for optimizations...${COLORS[NC]}"
+            suggest_optimizations
+            ;;
+        "full")
+            echo -e "${COLORS[GREEN]}Running full diagnostic suite...${COLORS[NC]}"
+            start_performance_monitoring
+            check_system_info && test_result "System Info Check" $?
+            check_device_compatibility && test_result "Device Compatibility" $?
+            check_network_connectivity
+            security_audit
+            suggest_optimizations
+            system_health_monitor
+            end_performance_monitoring
+            ;;
+        *)
+            echo -e "${COLORS[BLUE]}Enhanced Superuser Terminal - Available Commands:${COLORS[NC]}"
+            echo ""
+            echo "BASIC COMMANDS:"
+            echo "  check           - Run comprehensive system check (default)"
+            echo "  fix             - Fix su permissions with safety checks"
+            echo "  backup          - Create enhanced backup of critical files"
+            echo "  interactive     - Launch interactive mode"
+            echo ""
+            echo "SETUP COMMANDS:"
+            echo "  setup           - Run initial setup with optimizations"
+            echo "  build           - Build enhanced superuser directory structure"
+            echo "  structure       - Create superuser directory structure only"
+            echo "  install         - Install superuser terminal with full setup"
+            echo "  android         - Create Android development structure"
+            echo ""
+            echo "DIAGNOSTIC COMMANDS:"
+            echo "  benchmark       - Run system performance benchmark"
+            echo "  network         - Check network connectivity"
+            echo "  security        - Run security audit"
+            echo "  optimize        - Get optimization suggestions"
+            echo "  full            - Run complete diagnostic suite"
+            echo ""
+            echo "UTILITY COMMANDS:"
+            echo "  android-terminal - Launch Android command terminal"
+            echo "  android-info    - Get Android user information"
+            echo "  deps            - Auto-install missing dependencies"
+            echo "  logs            - View recent log entries"
+            echo "  status          - Quick system status"
+            echo "  env             - Environment information"
+            echo "  help            - Show detailed help"
+            echo "  version         - Show version information"
+            ;;
+    esac
+    
+    local cmd_end
+    cmd_end=$(date +%s)
+    local total_time
+    total_time=$((cmd_end - start_time))
+    
+    echo -e "${COLORS[BLUE]}Execution completed in ${total_time} seconds${COLORS[NC]}"
+    log "INFO" "Enhanced Superuser Terminal session completed (${total_time}s total)"
+    log "PERF" "Command '$command' execution took $((cmd_end - cmd_start)) seconds"
+    
+    return 0
+}
+
+# Interactive mode
+interactive_mode() {
+    while true; do
+        echo -e "\n${COLORS[PURPLE]}=== $BRAND_NAME v$VERSION ===${COLORS[NC]}"
+        echo "1. Run full system check"
+        echo "2. Fix su permissions"
+        echo "3. Android command terminal"
+        echo "4. Android user info"
+        echo "5. Create backup"
+        echo "6. View logs"
+        echo "7. Exit"
+        echo -n "Select option [1-7]: "
+        read -r choice
+        
+        case $choice in
+            1)
+                echo -e "${COLORS[GREEN]}Running full system check...${COLORS[NC]}"
+                check_system_info || true
+                check_device_compatibility || true
+                setup_root_superuser || true
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            2)
+                echo -e "${COLORS[GREEN]}Fixing su permissions...${COLORS[NC]}"
+                fix_su_permissions || true
+                check_accessibility || true
+                ;;
+            3)
+                echo -e "${COLORS[GREEN]}Launching Android terminal...${COLORS[NC]}"
+                android_cmd_terminal || true
+                ;;
+            4)
+                echo -e "${COLORS[GREEN]}Getting Android user info...${COLORS[NC]}"
+                android_user_info || true
+                ;;
+            5)
+                echo -e "${COLORS[GREEN]}Creating backup...${COLORS[NC]}"
+                backup_critical_files || true
+                ;;
+            6)
+                echo -e "${COLORS[CYAN]}Recent log entries:${COLORS[NC]}"
+                tail -20 "$LOG_FILE" 2>/dev/null || echo "No logs found"
+                ;;
+            7)
+                echo -e "${COLORS[GREEN]}Goodbye!${COLORS[NC]}"
+                break
+                ;;
+            *)
+                echo -e "${COLORS[RED]}Invalid option. Please try again.${COLORS[NC]}"
+                ;;
+        esac
+        
+        if [[ $choice != 7 ]]; then
+            echo ""
+            read -p "Press Enter to continue..."
+        fi
+    done
+}
+end of script

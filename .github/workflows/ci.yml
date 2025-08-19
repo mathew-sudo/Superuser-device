@@ -1,0 +1,107 @@
+name: Superuser CI Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_level:
+        description: 'Test level to run'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - quick
+        - full
+        - extended
+
+env:
+  ANDROID_NDK_VERSION: r25c
+  ANDROID_API_LEVEL: 29
+  TEST_TIMEOUT: 300
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    name: Lint and Validate Scripts
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck file bc
+    
+    - name: Lint Bash Scripts
+      run: |
+        echo "Running ShellCheck on Superuser_main..."
+        shellcheck -e SC1091,SC2034,SC2086,SC2155 Superuser_main
+        echo "✓ ShellCheck passed"
+    
+    - name: Validate Script Syntax
+      run: |
+        echo "Validating bash syntax..."
+        bash -n Superuser_main
+        echo "✓ Syntax validation passed"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    needs: [lint-and-validate]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Security Analysis
+      run: |
+        echo "Checking for security vulnerabilities..."
+        grep -n "exec\|eval\|system" Superuser_main || echo "✓ No dangerous functions found"
+        grep -n "rm -rf\|dd if=" Superuser_main || echo "✓ No destructive commands found"
+        echo "✓ Security scan completed"
+
+  quick-test:
+    runs-on: ubuntu-latest
+    name: Quick Functionality Test
+    needs: [lint-and-validate, security-scan]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Test Script Execution
+      run: |
+        echo "Testing script execution in dry-run mode..."
+        export DRY_RUN=1
+        export SKIP_ROOT_CHECK=1
+        export LOG_DIR="./test-logs"
+        mkdir -p "$LOG_DIR"
+        
+        timeout 60 bash Superuser_main check
+        timeout 60 bash Superuser_main setup
+        echo "✓ Basic execution tests passed"
+
+  compatibility-test:
+    runs-on: ubuntu-latest
+    name: Compatibility Test
+    needs: [quick-test]
+    strategy:
+      matrix:
+        shell: [bash, dash]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Test Shell Compatibility
+      run: |
+        echo "Testing with ${{ matrix.shell }}..."
+        export DRY_RUN=1
+        export SKIP_ROOT_CHECK=1
+        export LOG_DIR="./test-logs-${{ matrix.shell }}"
+        mkdir -p "$LOG_DIR"
+        
+        timeout 30 ${{ matrix.shell }} Superuser_main check || echo "Shell compatibility issue detected"

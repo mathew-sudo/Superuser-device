@@ -1,0 +1,7 @@
+# This would be a binary PNG file - create appropriate icon files for your app
+mkdir -p /workspaces/Superuser-device/app/src/main/res/mipmap-hdpi
+mkdir -p /workspaces/Superuser-device/app/src/main/res/mipmap-mdpi
+mkdir -p /workspaces/Superuser-device/app/src/main/res/mipmap-xhdpi
+mkdir -p /workspaces/Superuser-device/app/src/main/res/mipmap-xxhdpi
+mkdir -p /workspaces/Superuser-device/app/src/main/res/mipmap-xxxhdpi
+# Add actual PNG icon files here
