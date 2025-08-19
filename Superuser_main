@@ -1,4 +1,43 @@
 #!/bin/bash
+
+set -e
+
+# Root check
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This script must be run as root." >&2
+    exit 1
+fi
+
+# Version and branding
+VERSION="1.0-prototype"
+BRAND_NAME="Enhanced Superuser Terminal"
+
+# Logging
+LOG_DIR="/data/local/tmp/superuser_logs"
+LOG_FILE="$LOG_DIR/superuser_install.log"
+MAX_LOGS=12
+mkdir -p "$LOG_DIR"
+
+# Rotate logs if needed
+if [ $(ls "$LOG_DIR"/*.log 2>/dev/null | wc -l) -ge $MAX_LOGS ]; then
+    rm "$(ls -t "$LOG_DIR"/*.log | tail -1)"
+fi
+
+# Improved color array (declare -A for associative array)
+declare -A COLORS=(
+    [RED]='\033[0;31m'
+    [GREEN]='\033[0;32m'
+    [CYAN]='\033[0;36m'
+    [YELLOW]='\033[1;33m'
+    [NC]='\033[0m'
+)
+
+# List of su binary locations
+SU_PATHS=(
+    "/system/bin/su" "/system/xbin/su" "/sbin/su" "/su/bin/su" "/su/xbin/su" "/system/sbin/su" "/magisk/.core/bin/su" "/debug_ramdisk/su" "/sbin/bin/su" "/system/su" "/system/xbin/daemonsu" "/system/xbin/busybox" "/su" "/xbin/su" "/bin/su" "/0/su"
+)
+
+=======
 # Superuser Terminal Script
 # Version: 1.1-enhanced
 # This script automates the setup and maintenance of a superuser terminal environment on Android devices.
@@ -314,6 +353,7 @@ create_android_structure() {
             echo -e "${COLORS[RED]}✗${COLORS[NC]} Failed to create: $dir"
         }
     done
+main "$@
     # Create layout XML file
     cat > /data/superuser/android/app/src/main/res/layout/activity_main.xml << 'EOF'
 <?xml version="1.0" encoding="utf-8"?>
@@ -671,7 +711,8 @@ build_superuser_structure() {
         chmod 755 "$dir" 2>/dev/null || true
         chown root:root "$dir" 2>/dev/null || true
     done
-    
+   
+   main "$@"
     # Create essential configuration files
     create_superuser_configs
     
@@ -1326,6 +1367,8 @@ SU_PATHS=(
     "/system/bin/su" "/system/xbin/su" "/sbin/su" "/su/bin/su" "/su/xbin/su" "/system/sbin/su" "/magisk/.core/bin/su" "/debug_ramdisk/su" "/sbin/bin/su" "/system/su" "/system/xbin/daemonsu" "/system/xbin/busybox" "/su" "/xbin/su" "/bin/su" "/0/su"
 )
 
+main "$@"
+======
 # Setup root superuser directories and permissions
 setup_root_superuser() {
     local root_dirs=(
@@ -1350,6 +1393,16 @@ PS1='root@superuser:\w# '
 EOF
 }
 
+# Set permissions and ownership for su binaries
+fix_su_permissions() {
+    for su_path in "${SU_PATHS[@]}"; do
+        if [ -f "$su_path" ]; then
+            chmod 6755 "$su_path" && chown root:root "$su_path"
+            echo -e "${COLORS[GREEN]}Fixed permissions for $su_path${COLORS[NC]}"
+        fi
+    done
+main "$@"
+======
 # Enhanced su permissions fix with safety checks
 fix_su_permissions() {
     echo -e "${COLORS[CYAN]}Fixing su binary permissions...${COLORS[NC]}"
@@ -1453,11 +1506,37 @@ backup_critical_files() {
     
     echo -e "${COLORS[BLUE]}Backup location: $backup_dir${COLORS[NC]}"
     log "INFO" "Backup created at: $backup_dir"
+ main
 }
 
 # Improved accessibility check: also test execution
 check_accessibility() {
     echo -e "${COLORS[CYAN]}\nAccessibility Check Summary:${COLORS[NC]}"
+    local all_ok=1
+    for su_path in "${SU_PATHS[@]}"; do
+        if [ -f "$su_path" ]; then
+            perms=$(stat -c %a "$su_path")
+            owner=$(stat -c %U "$su_path")
+            group=$(stat -c %G "$su_path")
+            if [ "$perms" = "6755" ] && [ "$owner" = "root" ] && [ "$group" = "root" ]; then
+                # Try executing su --version or su -c id if possible
+                if "$su_path" --version >/dev/null 2>&1 || "$su_path" -c id >/dev/null 2>&1; then
+                    echo -e "${COLORS[GREEN]}OK${COLORS[NC]} $su_path (6755 root:root, executable)"
+                else
+                    echo -e "${COLORS[YELLOW]}WARN${COLORS[NC]} $su_path (permissions OK, but not executable as expected)"
+                    all_ok=0
+                fi
+            else
+                echo -e "${COLORS[RED]}BAD${COLORS[NC]} $su_path (perms: $perms, owner: $owner:$group)"
+                all_ok=0
+            fi
+        else
+            echo -e "${COLORS[RED]}MISSING${COLORS[NC]} $su_path"
+            all_ok=0
+        fi
+    done
+ main "$@"
+======
     log "INFO" "Starting accessibility check"
     local all_ok=1
     local found_count=0
@@ -1504,6 +1583,8 @@ check_accessibility() {
     
     echo -e "${COLORS[BLUE]}Summary: Found $found_count su binaries, $working_count working${COLORS[NC]}"
     
+main "$@"
+=====
     # Check root superuser dir
     if [ -d "/data/superuser" ]; then
         perms=$(stat -c %a /data/superuser)
@@ -1520,6 +1601,117 @@ check_accessibility() {
         all_ok=0
     fi
     
+    if [ $all_ok -eq 1 ]; then
+        echo -e "${COLORS[GREEN]}All checks passed!${COLORS[NC]}"
+    else
+        echo -e "${COLORS[RED]}Some issues detected. Please review above.${COLORS[NC]}"
+    fi
+}
+
+# Auto-install adb if missing
+install_adb_if_missing() {
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[YELLOW]}adb not found. Attempting to install Android Platform Tools...${COLORS[NC]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y android-tools-adb && echo -e "${COLORS[GREEN]}adb installed.${COLORS[NC]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y android-tools && echo -e "${COLORS[GREEN]}adb installed.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Could not auto-install adb. Please install it manually.${COLORS[NC]}"
+        fi
+    fi
+}
+
+# Android command terminal function
+android_cmd_terminal() {
+    install_adb_if_missing
+    echo -e "${COLORS[CYAN]}Launching Android command terminal...${COLORS[NC]}"
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[RED]}adb not found. Please install Android Platform Tools.${COLORS[NC]}"
+        return 1
+    fi
+    adb start-server >/dev/null 2>&1
+    adb shell || {
+        echo -e "${COLORS[RED]}Failed to open adb shell. Is your device connected and authorized?${COLORS[NC]}"
+        return 1
+    }
+}
+
+# Android user account and id info
+android_user_info() {
+    install_adb_if_missing
+    echo -e "${COLORS[CYAN]}Android User Account & ID Info:${COLORS[NC]}"
+    if ! command -v adb >/dev/null 2>&1; then
+        echo -e "${COLORS[RED]}adb not found. Please install Android Platform Tools.${COLORS[NC]}"
+        return 1
+    fi
+    adb start-server >/dev/null 2>&1
+    adb shell 'pm list users; id; whoami; getprop persist.sys.device_name; getprop ro.product.model; getprop ro.serialno' 2>/dev/null || {
+        echo -e "${COLORS[RED]}Failed to retrieve user info. Is your device connected and authorized?${COLORS[NC]}"
+        return 1
+    }
+}
+
+# Auto-configure sudo/root superuser if possible
+auto_configure_sudo() {
+    echo -e "${COLORS[CYAN]}Checking sudo/root superuser configuration...${COLORS[NC]}"
+    # Check if sudo is installed
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo -e "${COLORS[YELLOW]}sudo not found. Attempting to install...${COLORS[NC]}"
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y sudo && echo -e "${COLORS[GREEN]}sudo installed.${COLORS[NC]}"
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y sudo && echo -e "${COLORS[GREEN]}sudo installed.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Could not auto-install sudo. Please install it manually.${COLORS[NC]}"
+        fi
+    else
+        echo -e "${COLORS[GREEN]}sudo is present.${COLORS[NC]}"
+    fi
+    # Ensure current user is in sudoers if not root
+    if [ "$(id -u)" -ne 0 ]; then
+        user=$(whoami)
+        if sudo -l -U "$user" | grep -q '(ALL) ALL'; then
+            echo -e "${COLORS[GREEN]}$user already has sudo privileges.${COLORS[NC]}"
+        else
+            echo -e "${COLORS[YELLOW]}$user does not have sudo privileges. Attempting to add...${COLORS[NC]}"
+            echo "$user ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$user >/dev/null && \
+            echo -e "${COLORS[GREEN]}$user added to sudoers (NOPASSWD).${COLORS[NC]}"
+        fi
+    fi
+}
+
+# Test sudo/root superuser access
+check_sudo_root_access() {
+    echo -e "${COLORS[CYAN]}Testing sudo/root superuser access...${COLORS[NC]}"
+    if [ "$(id -u)" -eq 0 ]; then
+        echo -e "${COLORS[GREEN]}Already running as root.${COLORS[NC]}"
+    else
+        if sudo -n true 2>/dev/null; then
+            echo -e "${COLORS[GREEN]}Sudo access confirmed for $(whoami).${COLORS[NC]}"
+        else
+            echo -e "${COLORS[RED]}Sudo access failed for $(whoami).${COLORS[NC]}"
+        fi
+    fi
+}
+
+main() {
+    echo -e "${COLORS[CYAN]}$BRAND_NAME v$VERSION${COLORS[NC]}"
+    auto_configure_sudo
+    check_sudo_root_access
+    setup_root_superuser
+    fix_su_permissions
+    check_accessibility
+    # Optionally launch Android terminal or show user info if requested
+    if [ "$1" = "android-term" ]; then
+        android_cmd_terminal
+    elif [ "$1" = "android-user" ]; then
+        android_user_info
+    fi
+}
+
+main "$@"
+======
     # Enhanced diagnostics for issues
     if [[ ${#issues[@]} -gt 0 ]]; then
         echo -e "${COLORS[YELLOW]}Detected Issues:${COLORS[NC]}"
@@ -2156,6 +2348,7 @@ Timestamp: $(date)"
     echo "$output"
 }
 
+main () {
 # Create Android terminal server for app communication
 create_android_terminal_server() {
     echo -e "${COLORS[CYAN]}Creating Android terminal server...${COLORS[NC]}"
@@ -2609,3 +2802,4 @@ interactive_mode() {
         fi
     done
 }
+end of script
